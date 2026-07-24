@@ -47,6 +47,8 @@ class ArenaBase extends Phaser.Scene {
         this.lastSpecialTime  = 0;
         this.lastDashTime     = 0;
         this.lastFireballTime = 0;
+        this.aimX             = 0;    // last non-zero normalized input direction
+        this.aimY             = 1;    // default: facing down
         this.isDashing        = false;
         this.isInvincible     = false;
 
@@ -331,6 +333,14 @@ class ArenaBase extends Phaser.Scene {
 
         const moving = (vx !== 0 || vy !== 0);
         if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
+
+        // Store exact normalized aim vector — updated only when keys are held so the
+        // fireball still has a direction when the player is standing still.
+        if (moving) {
+            const len = Math.sqrt(vx * vx + vy * vy) || 1;
+            this.aimX = vx / len;
+            this.aimY = vy / len;
+        }
 
         // Determine facing from raw input before velocity mods.
         // No pure-left or pure-right sprites exist — use Left_Down / Right_Down instead.
@@ -1117,17 +1127,10 @@ class ArenaBase extends Phaser.Scene {
 
         this.lastFireballTime = time;
 
-        // Convert the six facing directions to a travel angle (Phaser screen coords:
-        // right = +x, down = +y).
-        const FACING_ANGLE = {
-            'Down':       Math.PI / 2,
-            'Up':        -Math.PI / 2,
-            'Right_Down': Math.PI / 4,
-            'Right_Up':  -Math.PI / 4,
-            'Left_Down':  Math.PI * 3 / 4,
-            'Left_Up':   -Math.PI * 3 / 4,
-        };
-        const angle = FACING_ANGLE[this.facing] ?? (Math.PI / 2);
+        // Launch angle from the exact input vector — pure right/left/up/down all work
+        // correctly because aimX/aimY are stored from raw keys, not from the sprite
+        // facing (which has no pure-left or pure-right variant).
+        const angle = Math.atan2(this.aimY, this.aimX);
         const speed = 540;
 
         // Spawn fireball sprite — tinted to element color for visual consistency

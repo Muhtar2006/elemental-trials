@@ -25,6 +25,11 @@ class ArenaBase extends Phaser.Scene {
         this.difficulty = ARENA_DIFFICULTY[this.element];
         this.colors     = ELEMENT_COLORS[this.element];
 
+        // Texture key for this element's insect enemy sprite
+        const _insectMap = { fire: 'insect_beetle', water: 'insect_maggot',
+                             earth: 'insect_mantis', air:  'insect_beetle' };
+        this.enemyTextureKey = _insectMap[this.element];
+
         // ---- Arena counters ----
         this.enemiesSpawned  = 0;
         this.enemiesKilled   = 0;
@@ -175,6 +180,22 @@ class ArenaBase extends Phaser.Scene {
     // Physics group that holds all normal enemies
     createEnemyGroup() {
         this.enemies = this.physics.add.group();
+        // Register insect walk animations once; guard prevents re-registration on restart
+        if (!this.anims.exists('insect_beetle_walk')) {
+            this.createInsectAnims();
+        }
+    }
+
+    // Walk animations for the three insect sprites (4 frames each at 8 fps)
+    createInsectAnims() {
+        ['insect_beetle', 'insect_maggot', 'insect_mantis'].forEach(key => {
+            this.anims.create({
+                key:       `${key}_walk`,
+                frames:    this.anims.generateFrameNumbers(key, { start: 0, end: 3 }),
+                frameRate: 8,
+                repeat:    -1,
+            });
+        });
     }
 
     // Physics group for special-attack projectiles (Q ability)
@@ -463,14 +484,16 @@ class ArenaBase extends Phaser.Scene {
         else if (side === 2) { x = 40;      y = randomRange(80, h - 40); }
         else                 { x = w - 40;  y = randomRange(80, h - 40); }
 
-        const enemy    = this.enemies.create(x, y, `enemy_${this.element}`);
+        const enemy = this.enemies.create(x, y, this.enemyTextureKey);
         enemy.setDepth(9);
-        enemy.hp       = this.difficulty.enemyHP;
-        enemy.maxHP    = this.difficulty.enemyHP;
+        enemy.setTint(this.colors.primary);
+        enemy.hp    = this.difficulty.enemyHP;
+        enemy.maxHP = this.difficulty.enemyHP;
+        enemy.anims.play(`${this.enemyTextureKey}_walk`);
 
-        // Pop-in animation
+        // Pop-in animation — tween to target display scale
         enemy.setScale(0);
-        this.tweens.add({ targets: enemy, scale: 1, duration: 280, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: enemy, scale: 2, duration: 280, ease: 'Back.easeOut' });
 
         this.enemiesSpawned++;
     }
@@ -591,9 +614,9 @@ class ArenaBase extends Phaser.Scene {
         enemy.hp -= amount;
         playHit();
 
-        // White flash for 60 ms
+        // White flash for 60 ms, then restore the element color tint
         enemy.setTint(0xffffff);
-        this.time.delayedCall(60, () => { if (enemy.active) enemy.clearTint(); });
+        this.time.delayedCall(60, () => { if (enemy.active) enemy.setTint(this.colors.primary); });
 
         // Knock enemy away from the player; AI steering resumes after 120 ms
         const kbAngle = angleBetween(this.player.x, this.player.y, enemy.x, enemy.y);

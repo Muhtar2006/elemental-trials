@@ -86,6 +86,11 @@ class BootScene extends Phaser.Scene {
             spacing:     1,
         });
 
+        // Insect enemy spritesheets — 32×32 frames, 4 frames per sheet
+        this.load.spritesheet('insect_beetle', 'assets/insects/BeetleMove.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('insect_maggot', 'assets/insects/MaggotWalk.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('insect_mantis', 'assets/insects/MantisMove.png', { frameWidth: 32, frameHeight: 32 });
+
         // Adventurer character spritesheets — 48×64 frames, 8 frames per sheet.
         // Six directional variants; no pure left/right (use Left_Down / Right_Down instead).
         ['Down', 'Up', 'Left_Down', 'Left_Up', 'Right_Down', 'Right_Up'].forEach(dir => {

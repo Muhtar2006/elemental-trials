@@ -67,6 +67,9 @@ class ArenaBase extends Phaser.Scene {
             loop: true,
         });
 
+        // Set up the element-specific hazard mechanic
+        this.initElementMechanic(w, h);
+
         this.cameras.main.fadeIn(600, 10, 10, 15);
         this.input.keyboard.on('keydown-ESC', () => this.togglePause());
     }
@@ -91,6 +94,7 @@ class ArenaBase extends Phaser.Scene {
         }
 
         this.updateUI();
+        this.updateElementMechanic(time, delta);
     }
 
     // -------------------------------------------------------
@@ -254,6 +258,22 @@ class ArenaBase extends Phaser.Scene {
         if (this.cursors.down.isDown)  vy += PLAYER.SPEED;
 
         if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
+
+        // WATER: lerp toward target each frame — pressing keys converges quickly,
+        // releasing them lets momentum carry for ~1.5 seconds before stopping.
+        if (this.element === 'water') {
+            const t = (vx !== 0 || vy !== 0) ? 0.12 : 0.05;
+            vx = lerp(this.player.body.velocity.x, vx, t);
+            vy = lerp(this.player.body.velocity.y, vy, t);
+        }
+
+        // AIR: constant lateral wind pushes the player on top of their input.
+        if (this.element === 'air') {
+            vx = clamp(
+                vx + this.windDirection * this.windForce,
+                -PLAYER.SPEED * 1.5, PLAYER.SPEED * 1.5
+            );
+        }
 
         this.player.setVelocity(vx, vy);
         if (vx < 0) this.player.setFlipX(true);
@@ -602,6 +622,9 @@ class ArenaBase extends Phaser.Scene {
             emitting:  false,
         }).explode(8);
 
+        // Trigger element mechanic (e.g. fire leaves a burning patch at the kill site)
+        this.onEnemyKillMechanic(enemy.x, enemy.y);
+
         enemy.destroy();
 
         this.enemiesKilled++;
@@ -888,5 +911,286 @@ class ArenaBase extends Phaser.Scene {
         ).setOrigin(0.5).setDepth(61);
 
         this.pauseOverlay = [bg, title, hint, controls];
+    }
+
+    // -------------------------------------------------------
+    //  ELEMENT MECHANICS  — one unique hazard per arena type
+    // -------------------------------------------------------
+
+    // Dispatch table: called once from create() after the scene is built.
+    initElementMechanic(w, h) {
+        if (this.element === 'fire')  this.initFireMechanic();
+        if (this.element === 'water') this.initWaterMechanic();
+        if (this.element === 'earth') this.initEarthMechanic();
+        if (this.element === 'air')   this.initAirMechanic(w, h);
+    }
+
+    // Called every frame from update(); dispatch by element.
+    updateElementMechanic(time, delta) {
+        if (this.element === 'fire')  this.updateFireMechanic();
+        if (this.element === 'earth') this.updateEarthMechanic(time);
+    }
+
+    // Called from killEnemy() right before enemy.destroy().
+    onEnemyKillMechanic(x, y) {
+        if (this.element === 'fire') this.spawnBurnPatch(x, y);
+    }
+
+    // ---- FIRE: burning ground patches -------------------------
+
+    initFireMechanic() {
+        this.burnPatches  = [];   // { graphic, particles, x, y, radius, expired }
+        this.lastBurnTick = 0;    // tracks the last time burn dealt damage
+    }
+
+    // Spawns an orange-red glow at (x, y) that deals 3 damage every 600 ms for 3 s.
+    spawnBurnPatch(x, y) {
+        const radius = 42;
+
+        const g = this.add.graphics().setDepth(3);
+        g.fillStyle(0xff5500, 0.5);
+        g.fillCircle(0, 0, radius);
+        g.x = x;
+        g.y = y;
+
+        // Flickering alpha over 3 s, then auto-destroy
+        this.tweens.add({
+            targets:  g,
+            alpha:    0.18,
+            duration: 280,
+            yoyo:     true,
+            repeat:   10,
+            onComplete: () => { g.destroy(); },
+        });
+
+        // Continuous flame particles rising from the patch
+        const flames = this.add.particles(x, y, 'particle_fire', {
+            speed:     { min: 8, max: 36 },
+            angle:     { min: 255, max: 285 },
+            scale:     { start: 0.55, end: 0 },
+            alpha:     { start: 0.85, end: 0 },
+            lifespan:  750,
+            frequency: 90,
+            quantity:  1,
+            blendMode: 'ADD',
+        });
+
+        const entry = { g, flames, x, y, radius, expired: false };
+        this.burnPatches.push(entry);
+
+        this.time.delayedCall(3000, () => {
+            entry.expired = true;
+            flames.destroy();
+        });
+    }
+
+    // Checks every frame whether the player is standing in any patch.
+    // Burn damage bypasses isInvincible (it's environmental, not enemy contact).
+    updateFireMechanic() {
+        // Purge entries that finished burning
+        this.burnPatches = this.burnPatches.filter(p => !p.expired);
+
+        if (this.gameOver || this.isDashing) return;
+
+        const inFire = this.burnPatches.some(p =>
+            distanceBetween(this.player.x, this.player.y, p.x, p.y) < p.radius
+        );
+
+        if (inFire && this.time.now > this.lastBurnTick + 600) {
+            this.lastBurnTick = this.time.now;
+            this.playerHP = Math.max(0, this.playerHP - 3);
+            // Brief orange tint to signal burn (doesn't interfere with enemy-hit red)
+            this.player.setTint(0xff7700);
+            this.time.delayedCall(140, () => { if (this.player.active) this.player.clearTint(); });
+            if (this.playerHP <= 0) this.loseArena();
+        }
+    }
+
+    // ---- WATER: slippery momentum ------------------------------
+    // Movement is fully handled inline in handleMovement() — no extra state needed.
+
+    initWaterMechanic() {
+        // nothing to initialise; water slide is driven by the lerp in handleMovement()
+    }
+
+    // ---- EARTH: falling rocks ---------------------------------
+
+    initEarthMechanic() {
+        this.earthRubble = [];   // { g, x, y, radius, expiresAt }
+
+        // Drop rocks every 6 s; first rock falls after a 3-second warmup.
+        this.time.delayedCall(3000, () => {
+            if (this.gameOver) return;
+            this.dropRock();
+            this.rockTimer = this.time.addEvent({
+                delay:         6000,
+                callback:      this.dropRock,
+                callbackScope: this,
+                loop:          true,
+            });
+        });
+    }
+
+    // Warns at the landing site, then drops a rock that hurts and leaves rubble.
+    dropRock() {
+        if (this.gameOver) return;
+
+        const w  = this.cameras.main.width;
+        const h  = this.cameras.main.height;
+        const tx = randomRange(90, w - 90);
+        const ty = randomRange(100, h - 70);
+
+        // Warning: pulsing red shadow at the landing site
+        const shadow = this.add.graphics().setDepth(3);
+        shadow.fillStyle(0xbb4400, 0.35);
+        shadow.fillCircle(tx, ty, 38);
+
+        this.tweens.add({
+            targets:  shadow,
+            alpha:    0.65,
+            duration: 180,
+            yoyo:     true,
+            repeat:   3,
+        });
+
+        this.time.delayedCall(850, () => {
+            shadow.destroy();
+            if (this.gameOver) return;
+
+            // Falling rock — a graphics circle that drops from the top
+            const rock = this.add.graphics().setDepth(15);
+            rock.fillStyle(0x6a5540, 1);
+            rock.fillCircle(0, 0, 18);
+            rock.x = tx;
+            rock.y = -30;
+
+            this.tweens.add({
+                targets:  rock,
+                y:        ty,
+                duration: 280,
+                ease:     'Quad.easeIn',
+                onComplete: () => {
+                    rock.destroy();
+                    if (this.gameOver) return;
+
+                    // Impact particles
+                    this.add.particles(tx, ty, 'particle_earth', {
+                        speed:     { min: 50, max: 150 },
+                        scale:     { start: 1.1, end: 0 },
+                        alpha:     { start: 1,   end: 0 },
+                        lifespan:  450,
+                        quantity:  10,
+                        blendMode: 'ADD',
+                        emitting:  false,
+                    }).explode(10);
+
+                    this.cameras.main.shake(160, 0.009);
+
+                    // Hurt player if they are in the impact zone
+                    if (distanceBetween(this.player.x, this.player.y, tx, ty) < 52) {
+                        this.damagePlayer(15);
+                    }
+
+                    // Leave rubble that slows the player for 2.5 s
+                    const rubbleG = this.add.graphics().setDepth(3);
+                    rubbleG.fillStyle(0x5a4430, 0.7);
+                    rubbleG.fillCircle(tx, ty, 34);
+
+                    const rubbleEntry = { g: rubbleG, x: tx, y: ty, radius: 34,
+                                         expiresAt: this.time.now + 2500 };
+                    this.earthRubble.push(rubbleEntry);
+                },
+            });
+        });
+    }
+
+    // Removes expired rubble and slows the player whenever they step into a rubble zone.
+    updateEarthMechanic(time) {
+        // Clean up expired rubble graphics
+        this.earthRubble = this.earthRubble.filter(r => {
+            if (time > r.expiresAt) { r.g.destroy(); return false; }
+            return true;
+        });
+
+        if (this.gameOver || this.isDashing) return;
+
+        const inRubble = this.earthRubble.some(r =>
+            distanceBetween(this.player.x, this.player.y, r.x, r.y) < r.radius
+        );
+
+        // 30 % speed cap while wading through rubble
+        if (inRubble) {
+            this.player.setVelocity(
+                this.player.body.velocity.x * 0.3,
+                this.player.body.velocity.y * 0.3
+            );
+        }
+    }
+
+    // ---- AIR: shifting wind -----------------------------------
+
+    initAirMechanic(w, h) {
+        this.windDirection = (Math.random() > 0.5) ? 1 : -1;
+        this.windForce     = 82;   // px/s added to player x-velocity
+        this.windWarning   = false;
+
+        // Wind direction indicator sits just below the kill counter (top-right)
+        this.windLabel = this.add.text(w - 10, 30, this._windText(), {
+            fontFamily:      'Cinzel, serif',
+            fontSize:        '12px',
+            color:           '#88ddff',
+            stroke:          '#000000',
+            strokeThickness: 2,
+        }).setOrigin(1, 0).setDepth(20);
+
+        // Schedule the first direction shift
+        this.scheduleWindShift();
+    }
+
+    _windText() {
+        return this.windDirection > 0 ? 'WIND  ▶' : '◀  WIND';
+    }
+
+    // 8-second cycle: 6.5 s of steady wind → 1.5 s warning → direction flip.
+    scheduleWindShift() {
+        this.time.delayedCall(6500, () => {
+            if (this.gameOver) return;
+            this.windWarning = true;
+            this._showWindWarning();
+
+            this.time.delayedCall(1500, () => {
+                if (this.gameOver) return;
+                this.windWarning    = false;
+                this.windDirection *= -1;
+                this.windLabel.setText(this._windText()).setColor('#88ddff');
+                this.scheduleWindShift();
+            });
+        });
+    }
+
+    // Brief center-screen flash warning that wind is about to shift.
+    _showWindWarning() {
+        const w = this.cameras.main.width;
+        const h = this.cameras.main.height;
+
+        this.windLabel.setColor('#ffdd00');
+
+        const msg = this.add.text(w / 2, h / 2 + 90, 'WIND SHIFTING!', {
+            fontFamily:      'Cinzel, serif',
+            fontSize:        '20px',
+            fontStyle:       'bold',
+            color:           '#ffdd00',
+            stroke:          '#000000',
+            strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(25).setAlpha(0);
+
+        this.tweens.add({
+            targets:  msg,
+            alpha:    1,
+            duration: 260,
+            yoyo:     true,
+            hold:     980,
+            onComplete: () => msg.destroy(),
+        });
     }
 }

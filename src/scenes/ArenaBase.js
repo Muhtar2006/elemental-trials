@@ -385,8 +385,26 @@ class ArenaBase extends Phaser.Scene {
     // Q — 8-directional projectile burst, costs SPECIAL_COST power
     handleSpecial(time) {
         if (!Phaser.Input.Keyboard.JustDown(this.cursors.special)) return;
-        if (time - this.lastSpecialTime < PLAYER.SPECIAL_COOLDOWN) return;
-        if (this.playerPower < PLAYER.SPECIAL_COST) return;
+
+        const onCooldown = time - this.lastSpecialTime < PLAYER.SPECIAL_COOLDOWN;
+        const lacksPower = this.playerPower < PLAYER.SPECIAL_COST;
+
+        if (onCooldown || lacksPower) {
+            // Flash the PWR bar to communicate why Q failed.
+            // Guard against re-triggering during the same flash window.
+            if (!this._pwrFlashActive) {
+                this._pwrFlashActive = true;
+                // Cooldown → dim grey; not enough power → angry red
+                this.powerBarFill.setTint(onCooldown ? 0x555555 : 0xff2222);
+                this.time.delayedCall(220, () => {
+                    this._pwrFlashActive = false;
+                    this.powerBarFill.setTint(this.colors.primary);
+                });
+                // Low error tone for the no-power case (skipped silently if helper absent)
+                if (!onCooldown && lacksPower && typeof playError === 'function') playError();
+            }
+            return;
+        }
 
         this.lastSpecialTime = time;
         this.playerPower -= PLAYER.SPECIAL_COST;
@@ -817,6 +835,26 @@ class ArenaBase extends Phaser.Scene {
         const powerRatio = this.playerPower / 100;
         this.powerBarFill.setScale(Math.max(0, powerRatio), 0.55);
 
+        // PWR ready-glow: pulse alpha when enough power to use special.
+        // Skipped while a blocked-Q flash is in progress to avoid fighting the tint.
+        if (!this._pwrFlashActive) {
+            const pwrReady = this.playerPower >= PLAYER.SPECIAL_COST;
+            if (pwrReady && !this._pwrPulse) {
+                this._pwrPulse = this.tweens.add({
+                    targets:  this.powerBarFill,
+                    alpha:    0.45,
+                    duration: 380,
+                    yoyo:     true,
+                    repeat:   -1,
+                    ease:     'Sine.easeInOut',
+                });
+            } else if (!pwrReady && this._pwrPulse) {
+                this._pwrPulse.stop();
+                this._pwrPulse = null;
+                this.powerBarFill.setAlpha(1);
+            }
+        }
+
         // Score
         this.scoreText.setText(`Score: ${this.arenaScore}`);
 
@@ -825,6 +863,25 @@ class ArenaBase extends Phaser.Scene {
             this.killText.setText(`Kills: ${this.enemiesKilled} / ${ENEMIES_PER_ARENA}`);
         } else {
             this.killText.setText(this.bossDefeated ? 'BOSS SLAIN!' : 'BOSS ALIVE');
+        }
+
+        // HP restore hint: pulse bright green when a charge is available and HP isn't full;
+        // dim to grey when pressing R would do nothing.
+        const restoreUsable = GameState.hpRestoreCount > 0 && this.playerHP < PLAYER.MAX_HP;
+        if (restoreUsable && !this._restorePulse) {
+            this.hpRestoreHint.setColor('#22dd44').setAlpha(1);
+            this._restorePulse = this.tweens.add({
+                targets:  this.hpRestoreHint,
+                alpha:    0.45,
+                duration: 550,
+                yoyo:     true,
+                repeat:   -1,
+                ease:     'Sine.easeInOut',
+            });
+        } else if (!restoreUsable && this._restorePulse) {
+            this._restorePulse.stop();
+            this._restorePulse = null;
+            this.hpRestoreHint.setAlpha(0.3).setColor('#555555');
         }
     }
 

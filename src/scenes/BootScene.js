@@ -79,11 +79,22 @@ class BootScene extends Phaser.Scene {
         // Orb / powerup textures
         this.generateOrbTextures();
 
-        // Real spritesheet assets
+        // Kenney roguelike character sheet (kept for reference / fallback)
         this.load.spritesheet('player_sheet', 'assets/roguelikeChar_transparent.png', {
             frameWidth:  16,
             frameHeight: 16,
-            spacing:     1,   // 1 px gap between every tile
+            spacing:     1,
+        });
+
+        // Adventurer character spritesheets — 48×64 frames, 8 frames per sheet.
+        // Six directional variants; no pure left/right (use Left_Down / Right_Down instead).
+        ['Down', 'Up', 'Left_Down', 'Left_Up', 'Right_Down', 'Right_Up'].forEach(dir => {
+            this.load.spritesheet(`adventurer_walk_${dir}`,
+                `assets/adventurer/Walk/walk_${dir}.png`,
+                { frameWidth: 48, frameHeight: 64 });
+            this.load.spritesheet(`adventurer_idle_${dir}`,
+                `assets/adventurer/Idle/Idle_${dir}.png`,
+                { frameWidth: 48, frameHeight: 64 });
         });
     }
 

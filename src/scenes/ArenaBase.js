@@ -35,7 +35,7 @@ class ArenaBase extends Phaser.Scene {
         this.paused          = false;
 
         // ---- Player state ----
-        this.playerBaseScale = 3;           // 16×16 frame → 48×48 display
+        this.playerBaseScale = 3;           // 48×64 adventurer frames scaled up 3×
         this.playerHP        = PLAYER.MAX_HP;
         this.playerPower     = 0;       // builds from kills; fuels Q special
         this.lastAttackTime  = 0;
@@ -134,13 +134,42 @@ class ArenaBase extends Phaser.Scene {
         });
     }
 
-    // Player physics sprite, centered in the arena
+    // Player physics sprite using directional adventurer animations
     createPlayer(w, h) {
-        // Frame 0 of the Kenney roguelikeChar sheet: armored knight facing forward
-        this.player = this.physics.add.sprite(w / 2, h / 2, 'player_sheet', 0);
-        this.player.setScale(this.playerBaseScale);   // 16×16 → 48×48
+        // Register all 12 animations once; guard prevents re-registration on scene restart
+        if (!this.anims.exists('walk_Down')) {
+            this.createAdventurerAnims();
+        }
+
+        this.player = this.physics.add.sprite(w / 2, h / 2, 'adventurer_idle_Down', 0);
+        this.player.setScale(this.playerBaseScale);
         this.player.setCollideWorldBounds(true);
         this.player.setDepth(10);
+        // Trim the physics body to the visible character (middle 20 px wide, bottom 40 px tall
+        // of the 48×64 frame). setSize/setOffset work in pre-scale frame pixels; Phaser
+        // multiplies by displayWidth/Height automatically for the actual body.
+        this.player.body.setSize(20, 40).setOffset(14, 24);
+
+        this.facing = 'Down';
+        this.player.anims.play('idle_Down');
+    }
+
+    // Create walk and idle animations for all six directions.
+    createAdventurerAnims() {
+        ['Down', 'Up', 'Left_Down', 'Left_Up', 'Right_Down', 'Right_Up'].forEach(dir => {
+            this.anims.create({
+                key:       `walk_${dir}`,
+                frames:    this.anims.generateFrameNumbers(`adventurer_walk_${dir}`, { start: 0, end: 7 }),
+                frameRate: 10,
+                repeat:    -1,
+            });
+            this.anims.create({
+                key:       `idle_${dir}`,
+                frames:    this.anims.generateFrameNumbers(`adventurer_idle_${dir}`, { start: 0, end: 7 }),
+                frameRate: 8,
+                repeat:    -1,
+            });
+        });
     }
 
     // Physics group that holds all normal enemies
@@ -247,22 +276,45 @@ class ArenaBase extends Phaser.Scene {
     //  INPUT HANDLERS  (called every frame from update)
     // -------------------------------------------------------
 
-    // WASD movement with diagonal normalisation
+    // WASD movement with diagonal normalisation and directional animation
     handleMovement() {
-        if (this.isDashing) return; // dash velocity takes over
+        if (this.isDashing) return;
+
+        const left  = this.cursors.left.isDown;
+        const right = this.cursors.right.isDown;
+        const up    = this.cursors.up.isDown;
+        const down  = this.cursors.down.isDown;
 
         let vx = 0, vy = 0;
-        if (this.cursors.left.isDown)  vx -= PLAYER.SPEED;
-        if (this.cursors.right.isDown) vx += PLAYER.SPEED;
-        if (this.cursors.up.isDown)    vy -= PLAYER.SPEED;
-        if (this.cursors.down.isDown)  vy += PLAYER.SPEED;
+        if (left)  vx -= PLAYER.SPEED;
+        if (right) vx += PLAYER.SPEED;
+        if (up)    vy -= PLAYER.SPEED;
+        if (down)  vy += PLAYER.SPEED;
 
+        const moving = (vx !== 0 || vy !== 0);
         if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
+
+        // Determine facing from raw input before velocity mods.
+        // No pure-left or pure-right sprites exist — use Left_Down / Right_Down instead.
+        if (moving) {
+            if      (!left && !right && up)   this.facing = 'Up';
+            else if (!left && !right && down) this.facing = 'Down';
+            else if (right && up)             this.facing = 'Right_Up';
+            else if (left  && up)             this.facing = 'Left_Up';
+            else if (right)                   this.facing = 'Right_Down';
+            else                              this.facing = 'Left_Down';
+        }
+
+        // Switch animation only when direction or move-state changes
+        const animKey = `${moving ? 'walk' : 'idle'}_${this.facing}`;
+        if (this.player.anims.currentAnim?.key !== animKey) {
+            this.player.anims.play(animKey, true);
+        }
 
         // WATER: lerp toward target each frame — pressing keys converges quickly,
         // releasing them lets momentum carry for ~1.5 seconds before stopping.
         if (this.element === 'water') {
-            const t = (vx !== 0 || vy !== 0) ? 0.12 : 0.05;
+            const t = moving ? 0.12 : 0.05;
             vx = lerp(this.player.body.velocity.x, vx, t);
             vy = lerp(this.player.body.velocity.y, vy, t);
         }
@@ -276,8 +328,7 @@ class ArenaBase extends Phaser.Scene {
         }
 
         this.player.setVelocity(vx, vy);
-        if (vx < 0) this.player.setFlipX(true);
-        if (vx > 0) this.player.setFlipX(false);
+        // No setFlipX — directional sprites handle orientation
     }
 
     // SPACE — melee swing that hits everything within ATTACK_RANGE

@@ -6,6 +6,7 @@ const config = {
     type: Phaser.AUTO,
     width: 1280,
     height: 720,
+    pixelArt: true,
     parent: 'game-container',
     backgroundColor: '#0a0a0f',
     scale: {

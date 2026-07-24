@@ -43,11 +43,12 @@ class ArenaBase extends Phaser.Scene {
         this.playerBaseScale = 3;           // 48×64 adventurer frames scaled up 3×
         this.playerHP        = PLAYER.MAX_HP;
         this.playerPower     = 0;       // builds from kills; fuels Q special
-        this.lastAttackTime  = 0;
-        this.lastSpecialTime = 0;
-        this.lastDashTime    = 0;
-        this.isDashing       = false;
-        this.isInvincible    = false;
+        this.lastAttackTime   = 0;
+        this.lastSpecialTime  = 0;
+        this.lastDashTime     = 0;
+        this.lastFireballTime = 0;
+        this.isDashing        = false;
+        this.isInvincible     = false;
 
         // ---- Boss state ----
         this.boss            = null;
@@ -62,6 +63,7 @@ class ArenaBase extends Phaser.Scene {
         this.createUI(w, h);
         this.setupInput();
         this.setupPhysics();
+        this.createFireballTexture();
 
         // Spawn first enemy after a short intro delay, then on the interval
         this.time.delayedCall(800, () => this.spawnEnemy());
@@ -85,6 +87,7 @@ class ArenaBase extends Phaser.Scene {
         this.handleMovement();
         this.handleAttack(time);
         this.handleSpecial(time);
+        this.handleFireball(time);
         this.handleDash(time);
         this.handleHPRestore();
 
@@ -198,9 +201,10 @@ class ArenaBase extends Phaser.Scene {
         });
     }
 
-    // Physics group for special-attack projectiles (Q ability)
+    // Physics groups for player projectiles
     createProjectileGroup() {
-        this.projectiles = this.physics.add.group();
+        this.projectiles = this.physics.add.group(); // Q special — 8-way burst
+        this.fireballs   = this.physics.add.group(); // F fireball — single-target bolt
     }
 
     // HUD: HP bar, power bar, score, kill counter, boss HP bar
@@ -229,6 +233,13 @@ class ArenaBase extends Phaser.Scene {
         // ---- HP restore hint ----
         this.hpRestoreHint = this.add.text(10, 50, `[R] Restore HP (${GameState.hpRestoreCount})`, {
             fontFamily: 'Cinzel, serif', fontSize: '11px', color: '#22dd44',
+            stroke: '#000000', strokeThickness: 1,
+        }).setDepth(20);
+
+        // ---- Fireball cooldown indicator ----
+        // Bright orange = ready; dim grey = cooling down; flashes red when pressed during cooldown
+        this.fireballIndicator = this.add.text(10, 64, '[F] Fireball  ●', {
+            fontFamily: 'Cinzel, serif', fontSize: '11px', color: '#ff8844',
             stroke: '#000000', strokeThickness: 1,
         }).setDepth(20);
 
@@ -277,7 +288,8 @@ class ArenaBase extends Phaser.Scene {
             attack:  Phaser.Input.Keyboard.KeyCodes.SPACE,
             special: Phaser.Input.Keyboard.KeyCodes.Q,
             dash:    Phaser.Input.Keyboard.KeyCodes.E,
-            restore: Phaser.Input.Keyboard.KeyCodes.R,
+            restore:  Phaser.Input.Keyboard.KeyCodes.R,
+            fireball: Phaser.Input.Keyboard.KeyCodes.F,
         });
     }
 
@@ -291,6 +303,10 @@ class ArenaBase extends Phaser.Scene {
             this.projectiles, this.enemies,
             this.onProjectileHitEnemy, null, this
         );
+        this.physics.add.overlap(
+            this.fireballs, this.enemies,
+            this.onFireballHitEnemy, null, this
+        );
     }
 
     // -------------------------------------------------------
@@ -300,6 +316,7 @@ class ArenaBase extends Phaser.Scene {
     // WASD movement with diagonal normalisation and directional animation
     handleMovement() {
         if (this.isDashing) return;
+        if (this.time.now < (this._recoilUntil || 0)) return; // brief post-cast lock
 
         const left  = this.cursors.left.isDown;
         const right = this.cursors.right.isDown;
@@ -535,6 +552,8 @@ class ArenaBase extends Phaser.Scene {
             this.onPlayerBossOverlap, null, this);
         this.physics.add.overlap(this.projectiles, this.boss,
             this.onProjectileHitBoss, null, this);
+        this.physics.add.overlap(this.fireballs, this.boss,
+            this.onFireballHitBoss, null, this);
 
         playBossRoar();
         this.cameras.main.shake(320, 0.012);
@@ -883,6 +902,15 @@ class ArenaBase extends Phaser.Scene {
             this._restorePulse = null;
             this.hpRestoreHint.setAlpha(0.3).setColor('#555555');
         }
+
+        // Fireball indicator: bright orange when ready, dim when on cooldown.
+        // Skipped while a blocked-F flash is running so it doesn't fight the tint.
+        if (!this._fireballFlashActive) {
+            const fbReady = this.time.now - this.lastFireballTime >= 1500;
+            this.fireballIndicator
+                .setColor(fbReady ? '#ff8844' : '#444444')
+                .setAlpha(fbReady ? 1 : 0.5);
+        }
     }
 
     // Shrink the boss HP bar fill proportionally to remaining HP
@@ -1042,6 +1070,162 @@ class ArenaBase extends Phaser.Scene {
         ).setOrigin(0.5).setDepth(61);
 
         this.pauseOverlay = [bg, title, hint, controls];
+    }
+
+    // -------------------------------------------------------
+    //  FIREBALL SKILL  (F key)
+    // -------------------------------------------------------
+
+    // ---- PROJECTILE TEXTURE ----
+    // All fireball visual properties live here. To swap in a real sprite later:
+    //   1. Load your spritesheet/image in BootScene.js
+    //   2. Replace the generateTexture block below with a no-op (or remove the guard)
+    //   3. Change 'fireball_orb' to your new texture key in handleFireball()
+    createFireballTexture() {
+        if (this.textures.exists('fireball_orb')) return;
+        const g = this.make.graphics({ add: false });
+        // Outer glow ring
+        g.fillStyle(0xffffff, 0.25);
+        g.fillCircle(12, 12, 11);
+        // Core orb
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(12, 12, 7);
+        // Hot center
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(12, 12, 3);
+        g.generateTexture('fireball_orb', 24, 24);
+        g.destroy();
+    }
+
+    // F — directional bolt that travels toward this.facing, hits the first target
+    handleFireball(time) {
+        if (!Phaser.Input.Keyboard.JustDown(this.cursors.fireball)) return;
+
+        const FIREBALL_CD = 1500; // ms; must match the 1500 literal in updateUI
+
+        if (time - this.lastFireballTime < FIREBALL_CD) {
+            if (!this._fireballFlashActive) {
+                this._fireballFlashActive = true;
+                this.fireballIndicator.setColor('#ff3322').setAlpha(1);
+                this.time.delayedCall(200, () => {
+                    this._fireballFlashActive = false;
+                    // updateUI will restore the correct colour next frame
+                });
+            }
+            return;
+        }
+
+        this.lastFireballTime = time;
+
+        // Convert the six facing directions to a travel angle (Phaser screen coords:
+        // right = +x, down = +y).
+        const FACING_ANGLE = {
+            'Down':       Math.PI / 2,
+            'Up':        -Math.PI / 2,
+            'Right_Down': Math.PI / 4,
+            'Right_Up':  -Math.PI / 4,
+            'Left_Down':  Math.PI * 3 / 4,
+            'Left_Up':   -Math.PI * 3 / 4,
+        };
+        const angle = FACING_ANGLE[this.facing] ?? (Math.PI / 2);
+        const speed = 540;
+
+        // Spawn fireball sprite — tinted to element color for visual consistency
+        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball_orb');
+        fb.setDepth(12);
+        fb.setTint(this.colors.primary);
+        fb.setScale(1.4);
+        fb.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+        // Particle trail follows the projectile
+        fb._trail = this.add.particles(0, 0, `particle_${this.element}`, {
+            follow:    fb,
+            speed:     { min: 6, max: 28 },
+            scale:     { start: 0.85, end: 0 },
+            alpha:     { start: 0.9,  end: 0 },
+            lifespan:  180,
+            frequency: 16,
+            quantity:  1,
+            blendMode: 'ADD',
+        });
+        fb._trail.setDepth(11);
+
+        // Auto-destroy after crossing the arena (~540 px/s × 1.8 s ≈ 972 px)
+        this.time.delayedCall(1800, () => {
+            if (fb.active) {
+                if (fb._trail) { fb._trail.destroy(); fb._trail = null; }
+                fb.destroy();
+            }
+        });
+
+        // --- Cast feedback ---
+        // Small camera shake
+        this.cameras.main.shake(55, 0.003);
+
+        // Recoil: push player back for 130 ms, suppress movement input during that window
+        this._recoilUntil = this.time.now + 130;
+        this.player.setVelocity(
+            Math.cos(angle + Math.PI) * 140,
+            Math.sin(angle + Math.PI) * 140
+        );
+
+        // Visual squash in the cast direction
+        this.tweens.add({
+            targets:  this.player,
+            scaleX:   this.playerBaseScale * 1.12,
+            scaleY:   this.playerBaseScale * 0.88,
+            duration: 70,
+            ease:     'Power2.easeOut',
+            yoyo:     true,
+            onComplete: () => { if (this.player.active) this.player.setScale(this.playerBaseScale); },
+        });
+
+        playSpecial(); // reuse special sound; swap for a dedicated cast sound if added later
+    }
+
+    // Fireball overlaps a normal enemy: impact + 3× base damage
+    onFireballHitEnemy(fireball, enemy) {
+        if (!fireball.active || !enemy.active) return;
+        this.fireballImpact(fireball, enemy.x, enemy.y);
+        this.damageEnemy(enemy, PLAYER.ATTACK_DAMAGE * 3);
+    }
+
+    // Fireball overlaps the boss: impact + 3× base damage
+    onFireballHitBoss(fireball, boss) {
+        if (!fireball.active || !boss.active) return;
+        this.fireballImpact(fireball, boss.x, boss.y);
+        this.damageBoss(PLAYER.ATTACK_DAMAGE * 3);
+    }
+
+    // Shared impact: element burst + spark ring, then destroy the fireball
+    fireballImpact(fireball, x, y) {
+        if (!fireball.active) return;
+
+        // Stop trail before destroying
+        if (fireball._trail) { fireball._trail.destroy(); fireball._trail = null; }
+        fireball.destroy();
+
+        // Element-colored burst
+        this.add.particles(x, y, `particle_${this.element}`, {
+            speed:     { min: 80, max: 230 },
+            scale:     { start: 1.3, end: 0 },
+            alpha:     { start: 1,   end: 0 },
+            lifespan:  500,
+            quantity:  16,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(16);
+
+        // White spark ring for extra pop
+        this.add.particles(x, y, 'particle_spark', {
+            speed:     { min: 60, max: 180 },
+            scale:     { start: 0.7, end: 0 },
+            alpha:     { start: 1,   end: 0 },
+            lifespan:  300,
+            quantity:  10,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(10);
     }
 
     // -------------------------------------------------------

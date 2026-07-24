@@ -35,6 +35,7 @@ class ArenaBase extends Phaser.Scene {
         this.paused          = false;
 
         // ---- Player state ----
+        this.playerBaseScale = 3;           // 16×16 frame → 48×48 display
         this.playerHP        = PLAYER.MAX_HP;
         this.playerPower     = 0;       // builds from kills; fuels Q special
         this.lastAttackTime  = 0;
@@ -131,7 +132,9 @@ class ArenaBase extends Phaser.Scene {
 
     // Player physics sprite, centered in the arena
     createPlayer(w, h) {
-        this.player = this.physics.add.sprite(w / 2, h / 2, 'player');
+        // Frame 0 of the Kenney roguelikeChar sheet: armored knight facing forward
+        this.player = this.physics.add.sprite(w / 2, h / 2, 'player_sheet', 0);
+        this.player.setScale(this.playerBaseScale);   // 16×16 → 48×48
         this.player.setCollideWorldBounds(true);
         this.player.setDepth(10);
     }
@@ -264,7 +267,6 @@ class ArenaBase extends Phaser.Scene {
 
         this.lastAttackTime = time;
         playSwing();
-        this.cameras.main.shake(50, 0.003);
 
         // Gain a little power on each swing
         this.playerPower = Math.min(100, this.playerPower + 5);
@@ -336,6 +338,18 @@ class ArenaBase extends Phaser.Scene {
             alpha: 0.4,
             duration: PLAYER.DASH_DURATION / 2,
             yoyo: true,
+        });
+
+        // Squash in the launch direction, spring back once dash ends.
+        // Targets are fractions of playerBaseScale so the effect scales correctly.
+        this.tweens.add({
+            targets:  this.player,
+            scaleX:   this.playerBaseScale * 0.65,
+            scaleY:   this.playerBaseScale * 1.30,
+            duration: 70,
+            ease:     'Power2.easeOut',
+            yoyo:     true,
+            onComplete: () => { if (this.player.active) this.player.setScale(this.playerBaseScale); },
         });
 
         this.time.delayedCall(PLAYER.DASH_DURATION,    () => { this.isDashing    = false; });
@@ -455,6 +469,9 @@ class ArenaBase extends Phaser.Scene {
 
     // Basic enemy AI: always move directly toward the player
     updateEnemyAI(enemy) {
+        // Let knockback play out before resuming steering
+        if (enemy.knockbackUntil && this.time.now < enemy.knockbackUntil) return;
+
         const angle = angleBetween(enemy.x, enemy.y, this.player.x, this.player.y);
         enemy.setVelocity(
             Math.cos(angle) * this.difficulty.enemySpeed,
@@ -465,6 +482,8 @@ class ArenaBase extends Phaser.Scene {
     // Boss AI: slowly tracks player, charges every 4 seconds
     updateBossAI(time, delta) {
         if (this.bossCharging) return;
+        // Let knockback play out before resuming steering
+        if (this.boss.knockbackUntil && this.time.now < this.boss.knockbackUntil) return;
 
         const angle = angleBetween(this.boss.x, this.boss.y, this.player.x, this.player.y);
         this.boss.setVelocity(
@@ -501,9 +520,18 @@ class ArenaBase extends Phaser.Scene {
         enemy.hp -= amount;
         playHit();
 
-        // White flash on hit
+        // White flash for 60 ms
         enemy.setTint(0xffffff);
-        this.time.delayedCall(80, () => { if (enemy.active) enemy.clearTint(); });
+        this.time.delayedCall(60, () => { if (enemy.active) enemy.clearTint(); });
+
+        // Knock enemy away from the player; AI steering resumes after 120 ms
+        const kbAngle = angleBetween(this.player.x, this.player.y, enemy.x, enemy.y);
+        enemy.setVelocity(Math.cos(kbAngle) * 280, Math.sin(kbAngle) * 280);
+        enemy.knockbackUntil = this.time.now + 120;
+
+        // Per-hit shake (only fires when something actually connects)
+        this.cameras.main.shake(55, 0.004);
+        this.hitStop(40);
 
         this.showDamageNumber(enemy.x, enemy.y, amount);
 
@@ -516,8 +544,17 @@ class ArenaBase extends Phaser.Scene {
         this.boss.hp -= amount;
         playHit();
 
+        // White flash for 60 ms
         this.boss.setTint(0xffffff);
-        this.time.delayedCall(80, () => { if (this.boss && this.boss.active) this.boss.clearTint(); });
+        this.time.delayedCall(60, () => { if (this.boss && this.boss.active) this.boss.clearTint(); });
+
+        // Slight knockback on boss (shorter duration — boss is heavy)
+        const kbAngle = angleBetween(this.player.x, this.player.y, this.boss.x, this.boss.y);
+        this.boss.setVelocity(Math.cos(kbAngle) * 120, Math.sin(kbAngle) * 120);
+        this.boss.knockbackUntil = this.time.now + 100;
+
+        this.cameras.main.shake(70, 0.005);
+        this.hitStop(40);
 
         this.showDamageNumber(this.boss.x, this.boss.y - 30, amount);
         this.updateBossHPBar();
@@ -543,16 +580,27 @@ class ArenaBase extends Phaser.Scene {
             onComplete: () => orb.destroy(),
         });
 
-        // Burst particles
+        // Element-colored burst
         this.add.particles(enemy.x, enemy.y, `particle_${this.element}`, {
-            speed:     { min: 60, max: 160 },
-            scale:     { start: 0.9, end: 0 },
+            speed:     { min: 60, max: 180 },
+            scale:     { start: 1.0, end: 0 },
             alpha:     { start: 1, end: 0 },
             lifespan:  600,
-            quantity:  10,
+            quantity:  14,
             blendMode: 'ADD',
             emitting:  false,
-        }).explode(10);
+        }).explode(14);
+
+        // White spark ring for extra pop
+        this.add.particles(enemy.x, enemy.y, 'particle_spark', {
+            speed:     { min: 90, max: 220 },
+            scale:     { start: 0.7, end: 0 },
+            alpha:     { start: 1, end: 0 },
+            lifespan:  350,
+            quantity:  8,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(8);
 
         enemy.destroy();
 
@@ -619,7 +667,8 @@ class ArenaBase extends Phaser.Scene {
 
         this.player.setTint(0xff3333);
         this.time.delayedCall(200, () => { if (this.player.active) this.player.clearTint(); });
-        this.cameras.main.shake(100, 0.008);
+        // Stronger shake than enemy hit to signal the player got hurt
+        this.cameras.main.shake(120, 0.011);
         this.time.delayedCall(PLAYER.INVINCIBLE_MS, () => { this.isInvincible = false; });
 
         if (this.playerHP <= 0) this.loseArena();
@@ -700,6 +749,19 @@ class ArenaBase extends Phaser.Scene {
             alpha: 0,
             duration: 680,
             onComplete: () => t.destroy(),
+        });
+    }
+
+    // Pause physics for `ms` milliseconds — creates the brief impact freeze ("hit-stop")
+    // that makes melee hits feel weighty. Scene time is unaffected so the resume
+    // callback always fires on schedule. Guards against stacking multiple hit-stops.
+    hitStop(ms) {
+        if (this.hitStopped) return;
+        this.hitStopped = true;
+        this.physics.world.pause();
+        this.time.delayedCall(ms, () => {
+            this.physics.world.resume();
+            this.hitStopped = false;
         });
     }
 

@@ -79,9 +79,12 @@ class BootScene extends Phaser.Scene {
         // Orb / powerup textures
         this.generateOrbTextures();
 
-        // All assets are procedurally generated above — no files to load.
-        // Phaser fires loader 'complete' immediately when the queue is empty,
-        // which is enough to advance to create().
+        // Real spritesheet assets
+        this.load.spritesheet('player_sheet', 'assets/roguelikeChar_transparent.png', {
+            frameWidth:  16,
+            frameHeight: 16,
+            spacing:     1,   // 1 px gap between every tile
+        });
     }
 
     create() {

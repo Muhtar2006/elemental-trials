@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Elemental Trials</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            font-family: 'Cinzel', serif;
+        }
+        #game-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+        }
+        #preloader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a0f;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 1s ease;
+        }
+        #preloader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #preloader h1 {
+            color: #c8a84e;
+            font-family: 'Cinzel', serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: 0.3em;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px rgba(200, 168, 78, 0.3);
+        }
+        #preloader-bar-container {
+            width: 300px;
+            height: 4px;
+            background: #1a1a2e;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        #preloader-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #c8a84e, #ffd700, #c8a84e);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        #preloader-sub {
+            color: #666;
+            font-family: 'Cinzel', serif;
+            font-size: 0.7rem;
+            letter-spacing: 0.2em;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div id="preloader">
+        <h1>ELEMENTAL TRIALS</h1>
+        <div id="preloader-bar-container">
+            <div id="preloader-bar"></div>
+        </div>
+        <div id="preloader-sub">Forging Realms...</div>
+    </div>
+    <div id="game-container"></div>
+
+    <!-- Phaser 3 Community Edition from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+
+    <!-- Game source files -->
+    <script src="src/utils.js"></script>
+    <script src="src/scenes/BootScene.js"></script>
+    <script src="src/scenes/MenuScene.js"></script>
+    <script src="src/scenes/HubScene.js"></script>
+    <script src="src/scenes/ArenaBase.js"></script>
+    <script src="src/scenes/ArenaFireScene.js"></script>
+    <script src="src/scenes/ArenaWaterScene.js"></script>
+    <script src="src/scenes/ArenaEarthScene.js"></script>
+    <script src="src/scenes/ArenaAirScene.js"></script>
+    <script src="src/scenes/GameOverScene.js"></script>
+    <script src="src/main.js"></script>
+</body>
+</html>

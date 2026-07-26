@@ -86,6 +86,9 @@ class BootScene extends Phaser.Scene {
             spacing:     1,
         });
 
+        // Hand-drawn fireball projectile sprite
+        this.load.image('fireball_sprite', 'assets/fireball.png');
+
         // Insect enemy spritesheets — 32×32 frames, 4 frames per sheet
         this.load.spritesheet('insect_beetle', 'assets/insects/BeetleMove.png', { frameWidth: 32, frameHeight: 32 });
         this.load.spritesheet('insect_maggot', 'assets/insects/MaggotWalk.png', { frameWidth: 32, frameHeight: 32 });

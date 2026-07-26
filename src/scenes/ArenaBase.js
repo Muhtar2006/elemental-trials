@@ -65,7 +65,6 @@ class ArenaBase extends Phaser.Scene {
         this.createUI(w, h);
         this.setupInput();
         this.setupPhysics();
-        this.createFireballTexture();
 
         // Spawn first enemy after a short intro delay, then on the interval
         this.time.delayedCall(800, () => this.spawnEnemy());
@@ -1086,27 +1085,6 @@ class ArenaBase extends Phaser.Scene {
     //  FIREBALL SKILL  (F key)
     // -------------------------------------------------------
 
-    // ---- PROJECTILE TEXTURE ----
-    // All fireball visual properties live here. To swap in a real sprite later:
-    //   1. Load your spritesheet/image in BootScene.js
-    //   2. Replace the generateTexture block below with a no-op (or remove the guard)
-    //   3. Change 'fireball_orb' to your new texture key in handleFireball()
-    createFireballTexture() {
-        if (this.textures.exists('fireball_orb')) return;
-        const g = this.make.graphics({ add: false });
-        // Outer glow ring
-        g.fillStyle(0xffffff, 0.25);
-        g.fillCircle(12, 12, 11);
-        // Core orb
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(12, 12, 7);
-        // Hot center
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(12, 12, 3);
-        g.generateTexture('fireball_orb', 24, 24);
-        g.destroy();
-    }
-
     // F — directional bolt that travels toward this.facing, hits the first target
     handleFireball(time) {
         if (!Phaser.Input.Keyboard.JustDown(this.cursors.fireball)) return;
@@ -1133,11 +1111,10 @@ class ArenaBase extends Phaser.Scene {
         const angle = Math.atan2(this.aimY, this.aimX);
         const speed = 540;
 
-        // Spawn fireball sprite — tinted to element color for visual consistency
-        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball_orb');
+        // Spawn fireball — natural colors from the hand-drawn sprite, no tint applied
+        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball_sprite');
         fb.setDepth(12);
-        fb.setTint(this.colors.primary);
-        fb.setScale(1.4);
+        fb.setScale(1.2);
         fb.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
 
         // Particle trail follows the projectile

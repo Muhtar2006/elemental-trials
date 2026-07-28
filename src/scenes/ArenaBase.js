@@ -550,11 +550,17 @@ class ArenaBase extends Phaser.Scene {
         const w = this.cameras.main.width;
         const h = this.cameras.main.height;
 
-        this.boss = this.physics.add.sprite(w / 2, 130, `boss_${this.element}`);
+        this.boss = this.physics.add.sprite(w / 2, 130, 'boss_sprite');
         this.boss.setDepth(9);
         this.boss.hp    = this.difficulty.bossHP;
         this.boss.maxHP = this.difficulty.bossHP;
         this.boss.setScale(0);
+
+        // Fire uses the sprite's natural colors; other elements get an element tint
+        // until their unique boss art is ready. Store the post-flash tint so damageBoss
+        // can restore it correctly after the white hit-flash.
+        this.bossTint = (this.element !== 'fire') ? this.colors.primary : null;
+        if (this.bossTint) this.boss.setTint(this.bossTint);
 
         // Wire up boss-specific overlaps now that the sprite exists
         this.physics.add.overlap(this.player, this.boss,
@@ -570,7 +576,7 @@ class ArenaBase extends Phaser.Scene {
 
         this.tweens.add({
             targets: this.boss,
-            scale: 1,
+            scale: 2,
             duration: 600,
             ease: 'Back.easeOut',
             onComplete: () => {
@@ -684,9 +690,14 @@ class ArenaBase extends Phaser.Scene {
         this.boss.hp -= amount;
         playHit();
 
-        // White flash for 60 ms
+        // White flash for 60 ms, then restore element tint (or clear for fire's natural colors)
         this.boss.setTint(0xffffff);
-        this.time.delayedCall(60, () => { if (this.boss && this.boss.active) this.boss.clearTint(); });
+        this.time.delayedCall(60, () => {
+            if (this.boss && this.boss.active) {
+                if (this.bossTint) this.boss.setTint(this.bossTint);
+                else               this.boss.clearTint();
+            }
+        });
 
         // Slight knockback on boss (shorter duration — boss is heavy)
         const kbAngle = angleBetween(this.player.x, this.player.y, this.boss.x, this.boss.y);

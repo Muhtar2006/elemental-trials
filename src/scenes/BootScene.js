@@ -89,6 +89,9 @@ class BootScene extends Phaser.Scene {
         // Hand-drawn fireball projectile sprite
         this.load.image('fireball_sprite', 'assets/fireball.png');
 
+        // Hand-drawn boss sprite (fire skull; tinted for other elements until unique bosses are made)
+        this.load.image('boss_sprite', 'assets/fire_boss.png');
+
         // Insect enemy spritesheets — 32×32 frames, 4 frames per sheet
         this.load.spritesheet('insect_beetle', 'assets/insects/BeetleMove.png', { frameWidth: 32, frameHeight: 32 });
         this.load.spritesheet('insect_maggot', 'assets/insects/MaggotWalk.png', { frameWidth: 32, frameHeight: 32 });

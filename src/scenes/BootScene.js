@@ -88,6 +88,7 @@ class BootScene extends Phaser.Scene {
 
         // Hand-drawn fireball projectile sprite
         this.load.image('fireball_sprite', 'assets/fireball.png');
+        this.load.image('ice_shard_sprite', 'assets/ice_shard.png');
 
         // Hand-drawn boss sprite (fire skull; tinted for other elements until unique bosses are made)
         this.load.image('boss_sprite', 'assets/fire_boss.png');

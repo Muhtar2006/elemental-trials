@@ -47,6 +47,7 @@ class ArenaBase extends Phaser.Scene {
         this.lastSpecialTime  = 0;
         this.lastDashTime     = 0;
         this.lastFireballTime = 0;
+        this.lastIceShardTime = 0;
         this.aimX             = 0;    // last non-zero normalized input direction
         this.aimY             = 1;    // default: facing down
         this.isDashing        = false;
@@ -89,6 +90,7 @@ class ArenaBase extends Phaser.Scene {
         this.handleAttack(time);
         this.handleSpecial(time);
         this.handleFireball(time);
+        this.handleIceShard(time);
         this.handleDash(time);
         this.handleHPRestore();
 
@@ -206,6 +208,7 @@ class ArenaBase extends Phaser.Scene {
     createProjectileGroup() {
         this.projectiles = this.physics.add.group(); // Q special — 8-way burst
         this.fireballs   = this.physics.add.group(); // F fireball — single-target bolt
+        this.iceShards   = this.physics.add.group(); // C ice shard — no damage, disappears on hit
     }
 
     // HUD: HP bar, power bar, score, kill counter, boss HP bar
@@ -241,6 +244,12 @@ class ArenaBase extends Phaser.Scene {
         // Bright orange = ready; dim grey = cooling down; flashes red when pressed during cooldown
         this.fireballIndicator = this.add.text(10, 64, '[F] Fireball  ●', {
             fontFamily: 'Cinzel, serif', fontSize: '11px', color: '#ff8844',
+            stroke: '#000000', strokeThickness: 1,
+        }).setDepth(20);
+
+        // ---- Ice Shard cooldown indicator ----
+        this.iceShardIndicator = this.add.text(10, 78, '[C] Ice Shard ●', {
+            fontFamily: 'Cinzel, serif', fontSize: '11px', color: '#88ddff',
             stroke: '#000000', strokeThickness: 1,
         }).setDepth(20);
 
@@ -290,7 +299,8 @@ class ArenaBase extends Phaser.Scene {
             special: Phaser.Input.Keyboard.KeyCodes.Q,
             dash:    Phaser.Input.Keyboard.KeyCodes.E,
             restore:  Phaser.Input.Keyboard.KeyCodes.R,
-            fireball: Phaser.Input.Keyboard.KeyCodes.F,
+            fireball:  Phaser.Input.Keyboard.KeyCodes.F,
+            iceShard:  Phaser.Input.Keyboard.KeyCodes.C,
         });
     }
 
@@ -307,6 +317,10 @@ class ArenaBase extends Phaser.Scene {
         this.physics.add.overlap(
             this.fireballs, this.enemies,
             this.onFireballHitEnemy, null, this
+        );
+        this.physics.add.overlap(
+            this.iceShards, this.enemies,
+            this.onIceShardHitEnemy, null, this
         );
     }
 
@@ -569,6 +583,8 @@ class ArenaBase extends Phaser.Scene {
             this.onProjectileHitBoss, null, this);
         this.physics.add.overlap(this.fireballs, this.boss,
             this.onFireballHitBoss, null, this);
+        this.physics.add.overlap(this.iceShards, this.boss,
+            this.onIceShardHitBoss, null, this);
 
         playBossRoar();
         this.cameras.main.shake(320, 0.012);
@@ -615,6 +631,16 @@ class ArenaBase extends Phaser.Scene {
 
     // Basic enemy AI: always move directly toward the player
     updateEnemyAI(enemy) {
+        // Frozen: hold still until timer expires, then restore element tint
+        if (enemy.frozenUntil && this.time.now < enemy.frozenUntil) {
+            enemy.setVelocity(0, 0);
+            return;
+        }
+        if (enemy.frozenUntil && this.time.now >= enemy.frozenUntil) {
+            enemy.frozenUntil = 0;
+            enemy.setTint(this.colors.primary);
+        }
+
         // Let knockback play out before resuming steering
         if (enemy.knockbackUntil && this.time.now < enemy.knockbackUntil) return;
 
@@ -627,6 +653,17 @@ class ArenaBase extends Phaser.Scene {
 
     // Boss AI: slowly tracks player, charges every 4 seconds
     updateBossAI(time, delta) {
+        // Frozen: hold still until timer expires, then restore boss tint
+        if (this.boss.frozenUntil && this.time.now < this.boss.frozenUntil) {
+            this.boss.setVelocity(0, 0);
+            return;
+        }
+        if (this.boss.frozenUntil && this.time.now >= this.boss.frozenUntil) {
+            this.boss.frozenUntil = 0;
+            if (this.bossTint) this.boss.setTint(this.bossTint);
+            else               this.boss.clearTint();
+        }
+
         if (this.bossCharging) return;
         // Let knockback play out before resuming steering
         if (this.boss.knockbackUntil && this.time.now < this.boss.knockbackUntil) return;
@@ -666,9 +703,15 @@ class ArenaBase extends Phaser.Scene {
         enemy.hp -= amount;
         playHit();
 
-        // White flash for 60 ms, then restore the element color tint
+        // White flash for 60 ms, then restore tint (ice blue if still frozen, element color otherwise)
         enemy.setTint(0xffffff);
-        this.time.delayedCall(60, () => { if (enemy.active) enemy.setTint(this.colors.primary); });
+        this.time.delayedCall(60, () => {
+            if (enemy.active) {
+                enemy.setTint(enemy.frozenUntil && this.time.now < enemy.frozenUntil
+                    ? 0x88ddff
+                    : this.colors.primary);
+            }
+        });
 
         // Knock enemy away from the player; AI steering resumes after 120 ms
         const kbAngle = angleBetween(this.player.x, this.player.y, enemy.x, enemy.y);
@@ -690,12 +733,17 @@ class ArenaBase extends Phaser.Scene {
         this.boss.hp -= amount;
         playHit();
 
-        // White flash for 60 ms, then restore element tint (or clear for fire's natural colors)
+        // White flash for 60 ms, then restore tint (ice blue if still frozen, element/clear otherwise)
         this.boss.setTint(0xffffff);
         this.time.delayedCall(60, () => {
             if (this.boss && this.boss.active) {
-                if (this.bossTint) this.boss.setTint(this.bossTint);
-                else               this.boss.clearTint();
+                if (this.boss.frozenUntil && this.time.now < this.boss.frozenUntil) {
+                    this.boss.setTint(0x88ddff);
+                } else if (this.bossTint) {
+                    this.boss.setTint(this.bossTint);
+                } else {
+                    this.boss.clearTint();
+                }
             }
         });
 
@@ -930,6 +978,14 @@ class ArenaBase extends Phaser.Scene {
             this.fireballIndicator
                 .setColor(fbReady ? '#ff8844' : '#444444')
                 .setAlpha(fbReady ? 1 : 0.5);
+        }
+
+        // Ice Shard indicator: bright cyan when ready, dim when on cooldown.
+        if (!this._iceShardFlashActive) {
+            const isReady = this.time.now - this.lastIceShardTime >= 4000;
+            this.iceShardIndicator
+                .setColor(isReady ? '#88ddff' : '#444444')
+                .setAlpha(isReady ? 1 : 0.5);
         }
     }
 
@@ -1217,6 +1273,126 @@ class ArenaBase extends Phaser.Scene {
             blendMode: 'ADD',
             emitting:  false,
         }).explode(10);
+    }
+
+    // -------------------------------------------------------
+    //  ICE SHARD SKILL  (C key)
+    // -------------------------------------------------------
+
+    // C — directional shard that travels toward this.facing; no damage, disappears on hit
+    handleIceShard(time) {
+        if (!Phaser.Input.Keyboard.JustDown(this.cursors.iceShard)) return;
+
+        const ICE_SHARD_CD = 4000;
+
+        if (time - this.lastIceShardTime < ICE_SHARD_CD) {
+            if (!this._iceShardFlashActive) {
+                this._iceShardFlashActive = true;
+                this.iceShardIndicator.setColor('#ff3322').setAlpha(1);
+                this.time.delayedCall(200, () => {
+                    this._iceShardFlashActive = false;
+                });
+            }
+            return;
+        }
+
+        this.lastIceShardTime = time;
+
+        const angle = Math.atan2(this.aimY, this.aimX);
+        const speed = 540;
+
+        const is = this.iceShards.create(this.player.x, this.player.y, 'ice_shard_sprite');
+        is.setDepth(12);
+        is.setScale(1.4);
+        is.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+        // Icy trail: alternate white sparks and light-blue water particles for a cold look
+        is._trail = this.add.particles(0, 0, 'particle_spark', {
+            follow:    is,
+            speed:     { min: 4, max: 20 },
+            scale:     { start: 0.7, end: 0 },
+            alpha:     { start: 0.85, end: 0 },
+            tint:      [0xaaeeff, 0xffffff, 0x66ddff],
+            lifespan:  200,
+            frequency: 14,
+            quantity:  2,
+            blendMode: 'ADD',
+        });
+        is._trail.setDepth(11);
+
+        this.time.delayedCall(1800, () => {
+            if (is.active) {
+                if (is._trail) { is._trail.destroy(); is._trail = null; }
+                is.destroy();
+            }
+        });
+
+        this.cameras.main.shake(55, 0.003);
+
+        this._recoilUntil = this.time.now + 130;
+        this.player.setVelocity(
+            Math.cos(angle + Math.PI) * 140,
+            Math.sin(angle + Math.PI) * 140
+        );
+
+        this.tweens.add({
+            targets:  this.player,
+            scaleX:   this.playerBaseScale * 1.12,
+            scaleY:   this.playerBaseScale * 0.88,
+            duration: 70,
+            ease:     'Power2.easeOut',
+            yoyo:     true,
+            onComplete: () => { if (this.player.active) this.player.setScale(this.playerBaseScale); },
+        });
+
+        playSpecial();
+    }
+
+    // Ice shard hits a normal enemy: freeze for 3s, no damage
+    onIceShardHitEnemy(iceShard, enemy) {
+        if (!iceShard.active || !enemy.active) return;
+        this.iceShardImpact(iceShard, enemy.x, enemy.y);
+        enemy.frozenUntil = this.time.now + 3000;
+        enemy.setTint(0x88ddff);
+        enemy.setVelocity(0, 0);
+    }
+
+    // Ice shard hits the boss: freeze for 1.5s, no damage
+    onIceShardHitBoss(iceShard, boss) {
+        if (!iceShard.active || !boss.active) return;
+        this.iceShardImpact(iceShard, boss.x, boss.y);
+        boss.frozenUntil = this.time.now + 1500;
+        boss.setTint(0x88ddff);
+        boss.setVelocity(0, 0);
+    }
+
+    // Shared impact: small spark burst, then destroy the shard
+    iceShardImpact(iceShard, x, y) {
+        if (!iceShard.active) return;
+
+        if (iceShard._trail) { iceShard._trail.destroy(); iceShard._trail = null; }
+        iceShard.destroy();
+
+        // Cold-colored burst: white sparks + light-blue water particles
+        this.add.particles(x, y, 'particle_spark', {
+            speed:     { min: 50, max: 140 },
+            scale:     { start: 0.6, end: 0 },
+            alpha:     { start: 1,   end: 0 },
+            tint:      [0xaaeeff, 0xffffff, 0x66ddff],
+            lifespan:  300,
+            quantity:  12,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(12);
+        this.add.particles(x, y, 'particle_water', {
+            speed:     { min: 30, max: 90 },
+            scale:     { start: 0.9, end: 0 },
+            alpha:     { start: 0.8, end: 0 },
+            lifespan:  350,
+            quantity:  8,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(8);
     }
 
     // -------------------------------------------------------

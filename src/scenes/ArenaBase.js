@@ -398,7 +398,7 @@ class ArenaBase extends Phaser.Scene {
         if (time - this.lastAttackTime < PLAYER.ATTACK_COOLDOWN) return;
 
         this.lastAttackTime = time;
-        playSwing();
+        this.sound.play('swing', { volume: 0.4 });
 
         // Gain a little power on each swing
         this.playerPower = Math.min(100, this.playerPower + 5);
@@ -586,7 +586,7 @@ class ArenaBase extends Phaser.Scene {
         this.physics.add.overlap(this.iceShards, this.boss,
             this.onIceShardHitBoss, null, this);
 
-        playBossRoar();
+        this.sound.play('boss_spawn', { volume: 0.5 });
         this.cameras.main.shake(320, 0.012);
         this.cameras.main.flash(400, 160, 20, 0, false);
 
@@ -701,7 +701,7 @@ class ArenaBase extends Phaser.Scene {
     // Apply damage to a normal enemy, kill if HP reaches 0
     damageEnemy(enemy, amount) {
         enemy.hp -= amount;
-        playHit();
+        this.sound.play('hit', { volume: 0.3 });
 
         // White flash for 60 ms, then restore tint (ice blue if still frozen, element color otherwise)
         enemy.setTint(0xffffff);
@@ -731,7 +731,7 @@ class ArenaBase extends Phaser.Scene {
     damageBoss(amount) {
         if (!this.boss || !this.boss.active) return;
         this.boss.hp -= amount;
-        playHit();
+        this.sound.play('hit', { volume: 0.3 });
 
         // White flash for 60 ms, then restore tint (ice blue if still frozen, element/clear otherwise)
         this.boss.setTint(0xffffff);
@@ -763,7 +763,7 @@ class ArenaBase extends Phaser.Scene {
 
     // Destroy enemy, add score, emit particles, check for boss spawn trigger
     killEnemy(enemy) {
-        playDeath();
+        this.sound.play('enemy_death', { volume: 0.35 });
 
         const points = Math.round(10 * this.difficulty.scoreMultiplier);
         this.arenaScore += points;
@@ -865,7 +865,7 @@ class ArenaBase extends Phaser.Scene {
 
         this.playerHP     = Math.max(0, this.playerHP - amount);
         this.isInvincible = true;
-        playPlayerHit();
+        this.sound.play('hurt', { volume: 0.45 });
 
         this.player.setTint(0xff3333);
         this.time.delayedCall(200, () => { if (this.player.active) this.player.clearTint(); });
@@ -1227,7 +1227,7 @@ class ArenaBase extends Phaser.Scene {
             onComplete: () => { if (this.player.active) this.player.setScale(this.playerBaseScale); },
         });
 
-        playSpecial(); // reuse special sound; swap for a dedicated cast sound if added later
+        this.sound.play('fireball', { volume: 0.4 });
     }
 
     // Fireball overlaps a normal enemy: impact + 3× base damage
@@ -1370,6 +1370,7 @@ class ArenaBase extends Phaser.Scene {
     iceShardImpact(iceShard, x, y) {
         if (!iceShard.active) return;
 
+        this.sound.play('freeze', { volume: 0.4 });
         if (iceShard._trail) { iceShard._trail.destroy(); iceShard._trail = null; }
         iceShard.destroy();
 

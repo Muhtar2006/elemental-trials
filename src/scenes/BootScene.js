@@ -79,6 +79,15 @@ class BootScene extends Phaser.Scene {
         // Orb / powerup textures
         this.generateOrbTextures();
 
+        // Sound effects — Kenney Impact Sounds
+        this.load.audio('swing',       'assets/sounds/swing.ogg');
+        this.load.audio('hit',         'assets/sounds/hit.ogg');
+        this.load.audio('fireball',    'assets/sounds/fireball.ogg');
+        this.load.audio('freeze',      'assets/sounds/freeze.ogg');
+        this.load.audio('hurt',        'assets/sounds/hurt.ogg');
+        this.load.audio('enemy_death', 'assets/sounds/enemy_death.ogg');
+        this.load.audio('boss_spawn',  'assets/sounds/boss_spawn.ogg');
+
         // Kenney roguelike character sheet (kept for reference / fallback)
         this.load.spritesheet('player_sheet', 'assets/roguelikeChar_transparent.png', {
             frameWidth:  16,

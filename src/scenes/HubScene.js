@@ -30,6 +30,9 @@ class HubScene extends Phaser.Scene {
         // ---- Player Stats ----
         this.createStatsDisplay(w, h);
 
+        // ---- Active Upgrades ----
+        this.createUpgradesDisplay(w, h);
+
         // ---- Gates ----
         this.gates = [];
         this.createGates(w, h);
@@ -143,6 +146,42 @@ class HubScene extends Phaser.Scene {
             stroke: '#000000',
             strokeThickness: 2,
         }).setOrigin(0.5, 0);
+    }
+
+    createUpgradesDisplay(w, h) {
+        if (GameState.upgrades.length === 0) return;
+
+        const px = 20;
+        const py = 145;
+
+        this.add.text(px, py, 'ACTIVE POWERS', {
+            fontFamily:      'Cinzel, serif',
+            fontSize:        '13px',
+            fontStyle:       'bold',
+            color:           '#c8a84e',
+            stroke:          '#000000',
+            strokeThickness: 2,
+        }).setOrigin(0, 0);
+
+        // Thin gold divider
+        const deco = this.add.graphics();
+        deco.lineStyle(1, COLORS.GOLD, 0.35);
+        deco.beginPath();
+        deco.moveTo(px, py + 19);
+        deco.lineTo(px + 190, py + 19);
+        deco.strokePath();
+
+        GameState.upgrades.forEach((id, i) => {
+            const upgrade = UPGRADE_POOL.find(u => u.id === id);
+            if (!upgrade) return;
+            this.add.text(px + 6, py + 28 + i * 20, `◆ ${upgrade.name}`, {
+                fontFamily:      'Cinzel, serif',
+                fontSize:        '12px',
+                color:           '#aaaaaa',
+                stroke:          '#000000',
+                strokeThickness: 1,
+            }).setOrigin(0, 0);
+        });
     }
 
     createGates(w, h) {

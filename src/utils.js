@@ -249,6 +249,13 @@ function playVictory() {
     });
 }
 
+function playUpgrade() {
+    const notes = [440, 554, 659, 880, 1109];
+    notes.forEach((n, i) => {
+        setTimeout(() => playTone(n, 0.18, 'sine', 0.12 - i * 0.015), i * 85);
+    });
+}
+
 function playPlayerHit() {
     playTone(180, 0.08, 'square', 0.15);
     playTone(90, 0.12, 'square', 0.1);
@@ -311,6 +318,7 @@ const GameState = {
     totalScore: 0,
     hpRestoreCount: 3,        // Full HP restores available
     currentElement: null,
+    upgrades: [],              // IDs of chosen upgrades; persists across arenas
     arenaData: {
         kills: 0,
         score: 0,
@@ -318,3 +326,20 @@ const GameState = {
         hpRestoresUsed: 0,
     },
 };
+
+GameState.hasUpgrade = (id) => GameState.upgrades.includes(id);
+
+// ---- Upgrade Pool ----
+
+const UPGRADE_POOL = [
+    { id: 'fireball_damage',   name: 'Blazing Fire',  desc: 'Fireball deals +50% damage.' },
+    { id: 'sword_range',       name: 'Long Reach',    desc: 'Sword attack range +30%.' },
+    { id: 'fireball_cooldown', name: 'Quick Cast',    desc: 'Fireball cooldown reduced by 30%.' },
+    { id: 'freeze_duration',   name: 'Deep Freeze',   desc: 'Ice shard freeze: 3s → 5s.' },
+    { id: 'ice_pierce',        name: 'Shard Pierce',  desc: 'Ice shard pierces and freezes 2 enemies.' },
+    { id: 'max_hp',            name: 'Iron Will',     desc: 'Maximum HP +25.' },
+    { id: 'heal_on_kill',      name: 'Vampiric',      desc: 'Heal 5 HP on every kill.' },
+    { id: 'hp_restore_charge', name: 'Field Medic',   desc: '+1 HP Restore charge (applied immediately).' },
+    { id: 'move_speed',        name: 'Swift Feet',    desc: 'Movement speed +20%.' },
+    { id: 'dash_cooldown',     name: 'Blur Step',     desc: 'Dash cooldown reduced by 40%.' },
+];

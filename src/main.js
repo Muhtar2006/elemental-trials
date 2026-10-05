@@ -24,6 +24,7 @@ const config = {
         BootScene,
         MenuScene,
         HubScene,
+        UpgradeScene,
         ArenaBase,
         ArenaFireScene,
         ArenaWaterScene,

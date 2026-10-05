@@ -41,7 +41,8 @@ class ArenaBase extends Phaser.Scene {
 
         // ---- Player state ----
         this.playerBaseScale = 3;           // 48×64 adventurer frames scaled up 3×
-        this.playerHP        = PLAYER.MAX_HP;
+        this.playerMaxHP     = PLAYER.MAX_HP + (GameState.hasUpgrade('max_hp') ? 25 : 0);
+        this.playerHP        = this.playerMaxHP;
         this.playerPower     = 0;       // builds from kills; fuels Q special
         this.lastAttackTime   = 0;
         this.lastSpecialTime  = 0;
@@ -338,11 +339,12 @@ class ArenaBase extends Phaser.Scene {
         const up    = this.cursors.up.isDown;
         const down  = this.cursors.down.isDown;
 
+        const spd = this.effectiveSpeed();
         let vx = 0, vy = 0;
-        if (left)  vx -= PLAYER.SPEED;
-        if (right) vx += PLAYER.SPEED;
-        if (up)    vy -= PLAYER.SPEED;
-        if (down)  vy += PLAYER.SPEED;
+        if (left)  vx -= spd;
+        if (right) vx += spd;
+        if (up)    vy -= spd;
+        if (down)  vy += spd;
 
         const moving = (vx !== 0 || vy !== 0);
         if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
@@ -384,7 +386,7 @@ class ArenaBase extends Phaser.Scene {
         if (this.element === 'air') {
             vx = clamp(
                 vx + this.windDirection * this.windForce,
-                -PLAYER.SPEED * 1.5, PLAYER.SPEED * 1.5
+                -spd * 1.5, spd * 1.5
             );
         }
 
@@ -409,14 +411,14 @@ class ArenaBase extends Phaser.Scene {
         // Hit normal enemies
         this.enemies.getChildren().forEach(enemy => {
             if (!enemy.active) return;
-            if (distanceBetween(px, py, enemy.x, enemy.y) <= PLAYER.ATTACK_RANGE) {
+            if (distanceBetween(px, py, enemy.x, enemy.y) <= this.effectiveAttackRange()) {
                 this.damageEnemy(enemy, PLAYER.ATTACK_DAMAGE);
             }
         });
 
         // Hit boss (slightly larger hitbox since the sprite is 80×80)
         if (this.boss && this.boss.active) {
-            if (distanceBetween(px, py, this.boss.x, this.boss.y) <= PLAYER.ATTACK_RANGE + 24) {
+            if (distanceBetween(px, py, this.boss.x, this.boss.y) <= this.effectiveAttackRange() + 24) {
                 this.damageBoss(PLAYER.ATTACK_DAMAGE);
             }
         }
@@ -465,7 +467,7 @@ class ArenaBase extends Phaser.Scene {
     // E — short burst of speed with brief invincibility
     handleDash(time) {
         if (!Phaser.Input.Keyboard.JustDown(this.cursors.dash)) return;
-        if (time - this.lastDashTime < PLAYER.DASH_COOLDOWN) return;
+        if (time - this.lastDashTime < this.effectiveDashCooldown()) return;
         if (this.isDashing) return;
 
         this.lastDashTime  = time;
@@ -510,11 +512,11 @@ class ArenaBase extends Phaser.Scene {
     handleHPRestore() {
         if (!Phaser.Input.Keyboard.JustDown(this.cursors.restore)) return;
         if (GameState.hpRestoreCount <= 0) return;
-        if (this.playerHP >= PLAYER.MAX_HP) return;
+        if (this.playerHP >= this.playerMaxHP) return;
 
         GameState.hpRestoreCount--;
         GameState.arenaData.hpRestoresUsed++;
-        this.playerHP = PLAYER.MAX_HP;
+        this.playerHP = this.playerMaxHP;
 
         this.cameras.main.flash(300, 20, 180, 50, false);
         this.hpRestoreHint.setText(`[R] Restore HP (${GameState.hpRestoreCount})`);
@@ -569,6 +571,8 @@ class ArenaBase extends Phaser.Scene {
         this.boss.hp    = this.difficulty.bossHP;
         this.boss.maxHP = this.difficulty.bossHP;
         this.boss.setScale(0);
+        this.boss.setCollideWorldBounds(true);
+        this._lastBossCharge = this.time.now;
 
         // Fire uses the sprite's natural colors; other elements get an element tint
         // until their unique boss art is ready. Store the post-flash tint so damageBoss
@@ -809,6 +813,10 @@ class ArenaBase extends Phaser.Scene {
         this.enemiesKilled++;
         GameState.arenaData.kills = this.enemiesKilled;
 
+        if (GameState.hasUpgrade('heal_on_kill')) {
+            this.playerHP = Math.min(this.playerMaxHP, this.playerHP + 5);
+        }
+
         // Killing enemies builds power toward the Q special
         this.playerPower = Math.min(100, this.playerPower + 15);
 
@@ -910,9 +918,9 @@ class ArenaBase extends Phaser.Scene {
 
     updateUI() {
         // HP bar: scale fill image on X axis (origin 0,0 so it shrinks from the right)
-        const hpRatio = this.playerHP / PLAYER.MAX_HP;
+        const hpRatio = this.playerHP / this.playerMaxHP;
         this.hpBarFill.setScale(Math.max(0, hpRatio), 1);
-        this.hpValueText.setText(`${Math.ceil(this.playerHP)} / 100`);
+        this.hpValueText.setText(`${Math.ceil(this.playerHP)} / ${this.playerMaxHP}`);
 
         if      (hpRatio > 0.5)  this.hpBarFill.setTint(COLORS.HP_GREEN);
         else if (hpRatio > 0.25) this.hpBarFill.setTint(COLORS.HP_YELLOW);
@@ -954,7 +962,7 @@ class ArenaBase extends Phaser.Scene {
 
         // HP restore hint: pulse bright green when a charge is available and HP isn't full;
         // dim to grey when pressing R would do nothing.
-        const restoreUsable = GameState.hpRestoreCount > 0 && this.playerHP < PLAYER.MAX_HP;
+        const restoreUsable = GameState.hpRestoreCount > 0 && this.playerHP < this.playerMaxHP;
         if (restoreUsable && !this._restorePulse) {
             this.hpRestoreHint.setColor('#22dd44').setAlpha(1);
             this._restorePulse = this.tweens.add({
@@ -974,7 +982,7 @@ class ArenaBase extends Phaser.Scene {
         // Fireball indicator: bright orange when ready, dim when on cooldown.
         // Skipped while a blocked-F flash is running so it doesn't fight the tint.
         if (!this._fireballFlashActive) {
-            const fbReady = this.time.now - this.lastFireballTime >= 1500;
+            const fbReady = this.time.now - this.lastFireballTime >= this.effectiveFireballCooldown();
             this.fireballIndicator
                 .setColor(fbReady ? '#ff8844' : '#444444')
                 .setAlpha(fbReady ? 1 : 0.5);
@@ -1056,7 +1064,10 @@ class ArenaBase extends Phaser.Scene {
             ...TEXT_STYLES.subtitle,
         }).setOrigin(0.5).setDepth(50).setAlpha(0);
 
-        const hintText = this.add.text(w / 2, h / 2 + 55, 'Returning to hub...', {
+        const availableUpgrades = UPGRADE_POOL.filter(u => !GameState.upgrades.includes(u.id));
+        const nextScene = availableUpgrades.length >= 1 ? 'UpgradeScene' : 'HubScene';
+        const hintText = this.add.text(w / 2, h / 2 + 55,
+            availableUpgrades.length >= 1 ? 'Choose your next power...' : 'Returning to hub...', {
             fontFamily: 'Cinzel, serif', fontSize: '16px', color: '#888888',
             stroke: '#000000', strokeThickness: 2,
         }).setOrigin(0.5).setDepth(50).setAlpha(0);
@@ -1065,7 +1076,7 @@ class ArenaBase extends Phaser.Scene {
 
         this.time.delayedCall(2800, () => {
             this.cameras.main.fadeOut(600, 0, 0, 0);
-            this.time.delayedCall(600, () => this.scene.start('HubScene'));
+            this.time.delayedCall(600, () => this.scene.start(nextScene));
         });
     }
 
@@ -1156,7 +1167,7 @@ class ArenaBase extends Phaser.Scene {
     handleFireball(time) {
         if (!Phaser.Input.Keyboard.JustDown(this.cursors.fireball)) return;
 
-        const FIREBALL_CD = 1500; // ms; must match the 1500 literal in updateUI
+        const FIREBALL_CD = this.effectiveFireballCooldown();
 
         if (time - this.lastFireballTime < FIREBALL_CD) {
             if (!this._fireballFlashActive) {
@@ -1230,18 +1241,18 @@ class ArenaBase extends Phaser.Scene {
         this.sound.play('fireball', { volume: 0.4 });
     }
 
-    // Fireball overlaps a normal enemy: impact + 3× base damage
+    // Fireball overlaps a normal enemy: impact + damage (upgrade-aware)
     onFireballHitEnemy(fireball, enemy) {
         if (!fireball.active || !enemy.active) return;
         this.fireballImpact(fireball, enemy.x, enemy.y);
-        this.damageEnemy(enemy, PLAYER.ATTACK_DAMAGE * 3);
+        this.damageEnemy(enemy, this.effectiveFireballDamage());
     }
 
-    // Fireball overlaps the boss: impact + 3× base damage
+    // Fireball overlaps the boss: impact + damage (upgrade-aware)
     onFireballHitBoss(fireball, boss) {
         if (!fireball.active || !boss.active) return;
         this.fireballImpact(fireball, boss.x, boss.y);
-        this.damageBoss(PLAYER.ATTACK_DAMAGE * 3);
+        this.damageBoss(this.effectiveFireballDamage());
     }
 
     // Shared impact: element burst + spark ring, then destroy the fireball
@@ -1348,13 +1359,39 @@ class ArenaBase extends Phaser.Scene {
         playSpecial();
     }
 
-    // Ice shard hits a normal enemy: freeze for 3s, no damage
+    // Ice shard hits a normal enemy: freeze (duration/pierce upgrade-aware)
     onIceShardHitEnemy(iceShard, enemy) {
         if (!iceShard.active || !enemy.active) return;
-        this.iceShardImpact(iceShard, enemy.x, enemy.y);
-        enemy.frozenUntil = this.time.now + 3000;
+        // Track per-shard hits to prevent same-enemy double-trigger and support pierce
+        if (!iceShard._hitEnemies) iceShard._hitEnemies = new Set();
+        if (iceShard._hitEnemies.has(enemy)) return;
+        iceShard._hitEnemies.add(enemy);
+
+        iceShard._hitCount = (iceShard._hitCount || 0) + 1;
+        enemy.frozenUntil  = this.time.now + this.effectiveFreezeDuration();
         enemy.setTint(0x88ddff);
         enemy.setVelocity(0, 0);
+
+        if (iceShard._hitCount >= this.effectiveIcePierce()) {
+            this.iceShardImpact(iceShard, enemy.x, enemy.y);
+        } else {
+            this.iceShardPartialImpact(enemy.x, enemy.y);
+        }
+    }
+
+    // Partial pierce hit: cold burst without destroying the shard
+    iceShardPartialImpact(x, y) {
+        this.sound.play('freeze', { volume: 0.25 });
+        this.add.particles(x, y, 'particle_spark', {
+            speed:     { min: 40, max: 120 },
+            scale:     { start: 0.5, end: 0 },
+            alpha:     { start: 1, end: 0 },
+            tint:      [0xaaeeff, 0xffffff, 0x66ddff],
+            lifespan:  240,
+            quantity:  6,
+            blendMode: 'ADD',
+            emitting:  false,
+        }).explode(6);
     }
 
     // Ice shard hits the boss: freeze for 1.5s, no damage
@@ -1650,6 +1687,18 @@ class ArenaBase extends Phaser.Scene {
             });
         });
     }
+
+    // -------------------------------------------------------
+    //  UPGRADE-AWARE EFFECTIVE STATS
+    // -------------------------------------------------------
+
+    effectiveSpeed()            { return PLAYER.SPEED         * (GameState.hasUpgrade('move_speed')        ? 1.2 : 1); }
+    effectiveAttackRange()      { return PLAYER.ATTACK_RANGE  * (GameState.hasUpgrade('sword_range')       ? 1.3 : 1); }
+    effectiveDashCooldown()     { return PLAYER.DASH_COOLDOWN * (GameState.hasUpgrade('dash_cooldown')     ? 0.6 : 1); }
+    effectiveFireballCooldown() { return 1500                 * (GameState.hasUpgrade('fireball_cooldown') ? 0.7 : 1); }
+    effectiveFireballDamage()   { return Math.round(PLAYER.ATTACK_DAMAGE * 3 * (GameState.hasUpgrade('fireball_damage') ? 1.5 : 1)); }
+    effectiveFreezeDuration()   { return GameState.hasUpgrade('freeze_duration') ? 5000 : 3000; }
+    effectiveIcePierce()        { return GameState.hasUpgrade('ice_pierce') ? 2 : 1; }
 
     // Brief center-screen flash warning that wind is about to shift.
     _showWindWarning() {

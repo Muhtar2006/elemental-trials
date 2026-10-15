@@ -734,6 +734,7 @@ class ArenaBase extends Phaser.Scene {
     // Apply damage to the boss, kill if HP reaches 0
     damageBoss(amount) {
         if (!this.boss || !this.boss.active) return;
+        if (!Number.isFinite(amount) || amount <= 0) return;
         this.boss.hp -= amount;
         this.sound.play('hit', { volume: 0.3 });
 
@@ -906,7 +907,7 @@ class ArenaBase extends Phaser.Scene {
     }
 
     // Projectile hits the boss: destroy projectile, deal double attack damage
-    onProjectileHitBoss(projectile, boss) {
+    onProjectileHitBoss(boss, projectile) {
         if (!projectile.active || !boss.active) return;
         projectile.destroy();
         this.damageBoss(PLAYER.ATTACK_DAMAGE * 2);
@@ -1000,7 +1001,7 @@ class ArenaBase extends Phaser.Scene {
     // Shrink the boss HP bar fill proportionally to remaining HP
     updateBossHPBar() {
         if (!this.boss) return;
-        const ratio = Math.max(0, this.boss.hp / this.boss.maxHP);
+        const ratio = Math.max(0, (this.boss.hp / this.boss.maxHP) || 0);
         // Base scaleX is 1.5 (= 300 px); multiply by ratio to show depletion
         this.bossHpFill.setScale(ratio * 1.5, 1);
     }
@@ -1696,7 +1697,7 @@ class ArenaBase extends Phaser.Scene {
     effectiveAttackRange()      { return PLAYER.ATTACK_RANGE  * (GameState.hasUpgrade('sword_range')       ? 1.3 : 1); }
     effectiveDashCooldown()     { return PLAYER.DASH_COOLDOWN * (GameState.hasUpgrade('dash_cooldown')     ? 0.6 : 1); }
     effectiveFireballCooldown() { return 1500                 * (GameState.hasUpgrade('fireball_cooldown') ? 0.7 : 1); }
-    effectiveFireballDamage()   { return Math.round(PLAYER.ATTACK_DAMAGE * 3 * (GameState.hasUpgrade('fireball_damage') ? 1.5 : 1)); }
+    effectiveFireballDamage()   { return Math.round(PLAYER.FIREBALL_DAMAGE  * (GameState.hasUpgrade('fireball_damage') ? 1.5 : 1)); }
     effectiveFreezeDuration()   { return GameState.hasUpgrade('freeze_duration') ? 5000 : 3000; }
     effectiveIcePierce()        { return GameState.hasUpgrade('ice_pierce') ? 2 : 1; }
 

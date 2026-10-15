@@ -1250,7 +1250,7 @@ class ArenaBase extends Phaser.Scene {
     }
 
     // Fireball overlaps the boss: impact + damage (upgrade-aware)
-    onFireballHitBoss(fireball, boss) {
+    onFireballHitBoss(boss, fireball) {
         if (!fireball.active || !boss.active) return;
         this.fireballImpact(fireball, boss.x, boss.y);
         this.damageBoss(this.effectiveFireballDamage());
@@ -1396,7 +1396,7 @@ class ArenaBase extends Phaser.Scene {
     }
 
     // Ice shard hits the boss: freeze for 1.5s, no damage
-    onIceShardHitBoss(iceShard, boss) {
+    onIceShardHitBoss(boss, iceShard) {
         if (!iceShard.active || !boss.active) return;
         this.iceShardImpact(iceShard, boss.x, boss.y);
         boss.frozenUntil = this.time.now + 1500;

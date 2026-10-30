@@ -1199,10 +1199,14 @@ class ArenaBase extends Phaser.Scene {
         const angle = Math.atan2(this.aimY, this.aimX);
         const speed = 540;
 
-        // Spawn fireball — natural colors from the hand-drawn sprite, no tint applied
-        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball_sprite');
+        // Spawn fireball — animated ember sheet, rotated to its flight direction
+        const fb = this.fireballs.create(this.player.x, this.player.y, 'fireball_ember');
         fb.setDepth(12);
         fb.setScale(1.2);
+        // Square body keeps the hit area identical whichever way the ember flies
+        fb.body.setSize(32, 32, true);
+        fb.setRotation(angle);
+        fb.play('fireball_ember');
         fb.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
 
         // Particle trail follows the projectile

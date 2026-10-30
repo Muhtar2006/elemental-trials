@@ -95,8 +95,15 @@ class BootScene extends Phaser.Scene {
             spacing:     1,
         });
 
-        // Hand-drawn fireball projectile sprite
+        // Hand-drawn fireball projectile sprite (kept as a fallback)
         this.load.image('fireball_sprite', 'assets/fireball.png');
+
+        // Animated ember fireball — 4 frames in one row, 33×19 each
+        this.load.spritesheet('fireball_ember', 'assets/fireball_ember_sheet.png', {
+            frameWidth:  33,
+            frameHeight: 19,
+        });
+
         this.load.image('ice_shard_sprite', 'assets/ice_shard.png');
 
         // Hand-drawn boss sprite (fire skull; tinted for other elements until unique bosses are made)
@@ -125,6 +132,16 @@ class BootScene extends Phaser.Scene {
         if (preloader) preloader.classList.add('hidden');
 
         this.cameras.main.fadeIn(500, 10, 10, 15);
+
+        // Ember fireball loop: 4 frames at ~10 fps
+        if (!this.anims.exists('fireball_ember')) {
+            this.anims.create({
+                key: 'fireball_ember',
+                frames: this.anims.generateFrameNumbers('fireball_ember', { start: 0, end: 3 }),
+                frameRate: 10,
+                repeat: -1,
+            });
+        }
 
         this.time.delayedCall(600, () => {
             this.scene.start('MenuScene');

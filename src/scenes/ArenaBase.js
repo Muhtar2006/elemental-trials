@@ -1050,9 +1050,14 @@ class ArenaBase extends Phaser.Scene {
         GameState.totalBossesDefeated += 1;
         GameState.totalScore          += this.arenaScore;
 
-        if (!GameState.completedElements.includes(this.element)) {
+        // Track whether *this* clear finishes the run, so replaying an
+        // already-cleared arena can't reopen the win screen.
+        const newlyCleared = !GameState.completedElements.includes(this.element);
+        if (newlyCleared) {
             GameState.completedElements.push(this.element);
         }
+        const allArenasCleared =
+            newlyCleared && GameState.completedElements.length >= ELEMENT_ORDER.length;
 
         const w = this.cameras.main.width;
         const h = this.cameras.main.height;
@@ -1066,9 +1071,13 @@ class ArenaBase extends Phaser.Scene {
         }).setOrigin(0.5).setDepth(50).setAlpha(0);
 
         const availableUpgrades = UPGRADE_POOL.filter(u => !GameState.upgrades.includes(u.id));
-        const nextScene = availableUpgrades.length >= 1 ? 'UpgradeScene' : 'HubScene';
+        const nextScene = allArenasCleared
+            ? 'WinScene'
+            : availableUpgrades.length >= 1 ? 'UpgradeScene' : 'HubScene';
         const hintText = this.add.text(w / 2, h / 2 + 55,
-            availableUpgrades.length >= 1 ? 'Choose your next power...' : 'Returning to hub...', {
+            allArenasCleared
+                ? 'The fourth realm falls. The trials are complete...'
+                : availableUpgrades.length >= 1 ? 'Choose your next power...' : 'Returning to hub...', {
             fontFamily: 'Cinzel, serif', fontSize: '16px', color: '#888888',
             stroke: '#000000', strokeThickness: 2,
         }).setOrigin(0.5).setDepth(50).setAlpha(0);

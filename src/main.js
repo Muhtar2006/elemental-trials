@@ -31,6 +31,7 @@ const config = {
         ArenaEarthScene,
         ArenaAirScene,
         GameOverScene,
+        WinScene,
     ],
 };
 

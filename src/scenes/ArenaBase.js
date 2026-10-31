@@ -228,6 +228,7 @@ class ArenaBase extends Phaser.Scene {
         this.projectiles = this.physics.add.group(); // Q special — 8-way burst
         this.fireballs   = this.physics.add.group(); // F fireball — single-target bolt
         this.iceShards   = this.physics.add.group(); // C ice shard — no damage, disappears on hit
+        this.bossProjectiles = this.physics.add.group(); // Bellkeeper water orbs
     }
 
     // HUD: HP bar, power bar, score, kill counter, boss HP bar
@@ -338,6 +339,7 @@ class ArenaBase extends Phaser.Scene {
         if (GameState.debug) {
             this.input.keyboard.on('keydown-NINE',  () => this.debugRage());
             this.input.keyboard.on('keydown-ZERO',  () => this.debugSpawnBoss());
+            this.input.keyboard.on('keydown-SIX',   () => this.debugWaterArena());
             this.input.keyboard.on('keydown-SEVEN', () => this.debugEarthArena());
             this.input.keyboard.on('keydown-EIGHT', () => this.debugWin());
         }
@@ -360,6 +362,14 @@ class ArenaBase extends Phaser.Scene {
     debugSpawnBoss() {
         if (this.gameOver) return;
         this.spawnBoss();
+    }
+
+    // 6 — jump straight to the Water arena
+    debugWaterArena() {
+        GameState.currentElement = 'water';
+        GameState.arenaData = { kills: 0, score: 0, bossDefeated: false, hpRestoresUsed: 0 };
+        this.cameras.main.fadeOut(400, 0, 0, 0);
+        this.time.delayedCall(400, () => this.scene.start('ArenaWaterScene'));
     }
 
     // 7 — jump straight to the Earth arena
@@ -643,9 +653,12 @@ class ArenaBase extends Phaser.Scene {
         const w = this.cameras.main.width;
         const h = this.cameras.main.height;
 
-        // Earth has unique art now; the other elements still use the tinted fire skull
-        const isCairnback = this.element === 'earth';
-        const bossTexture = isCairnback ? 'boss_earth_cairnback' : 'boss_sprite';
+        // Earth and Water have unique art; Fire and Air still use the tinted fire skull
+        const isCairnback  = this.element === 'earth';
+        const isBellkeeper = this.element === 'water';
+        const bossTexture  = isCairnback  ? 'boss_earth_cairnback'
+                           : isBellkeeper ? 'boss_water_bellkeeper'
+                           : 'boss_sprite';
 
         this.boss = this.physics.add.sprite(w / 2, 130, bossTexture);
         this.boss.setDepth(9);
@@ -657,10 +670,12 @@ class ArenaBase extends Phaser.Scene {
 
         // Cairnback renders at scale 2 (128 px) but keeps the old boss's 96×96
         // on-screen hitbox, so overlap behaviour is unchanged.
-        if (isCairnback) {
+        if (isCairnback || isBellkeeper) {
             this.boss.body.setSize(48, 48, true);
-            this.boss.play('boss_cairnback_idle');
+            this.boss.play(this.bossAnimKey('idle'));
+        }
 
+        if (isCairnback) {
             // Breathing state: phase in ms, and the pixel offset currently applied
             this._breathPhase   = 0;
             this._breathApplied = 0;
@@ -669,7 +684,9 @@ class ArenaBase extends Phaser.Scene {
         // Fire and Earth use their sprite's natural colors; the rest get an element
         // tint until their unique boss art is ready. Store the post-flash tint so
         // damageBoss can restore it correctly after the white hit-flash.
-        this.bossTint = (this.element !== 'fire' && !isCairnback) ? this.colors.primary : null;
+        this.bossTint = (this.element !== 'fire' && !isCairnback && !isBellkeeper)
+            ? this.colors.primary
+            : null;
         if (this.bossTint) this.boss.setTint(this.bossTint);
 
         // Wire up boss-specific overlaps now that the sprite exists
@@ -681,6 +698,8 @@ class ArenaBase extends Phaser.Scene {
             this.onFireballHitBoss, null, this);
         this.physics.add.overlap(this.iceShards, this.boss,
             this.onIceShardHitBoss, null, this);
+        this.physics.add.overlap(this.bossProjectiles, this.player,
+            this.onPlayerBossProjectileOverlap, null, this);
 
         this.sound.play('boss_spawn', { volume: 0.5 });
         this.cameras.main.shake(320, 0.012);
@@ -762,8 +781,8 @@ class ArenaBase extends Phaser.Scene {
 
         if (this.bossCharging) return;
 
-        // Cairnback holds still during his warning and recovery poses
-        if (this.element === 'earth' &&
+        // Cairnback and the Bellkeeper hold still during warning and recovery poses
+        if ((this.element === 'earth' || this.element === 'water') &&
             (this.bossPhase === 'warning' || this.bossPhase === 'recovery')) {
             this.boss.setVelocity(0, 0);
             return;
@@ -806,22 +825,70 @@ class ArenaBase extends Phaser.Scene {
         this.time.delayedCall(650, () => {
             this.bossCharging = false;
 
-            // Earth drops into the open-shell recovery after every charge
-            if (this.element === 'earth') this.startBossRecovery();
+            // Unique boss art drops into the open-shell recovery after every attack
+            if (this.element === 'earth' || this.element === 'water') this.startBossRecovery();
         });
     }
 
-    // 0.6 s wind-up: head lowered, standing still, then the charge
+    // Animation key prefix for the element's unique boss art, if it has any
+    bossAnimKey(suffix) {
+        if (this.element === 'earth') return `boss_cairnback_${suffix}`;
+        if (this.element === 'water') return `boss_bellkeeper_${suffix}`;
+        return null;
+    }
+
+    // 0.6 s wind-up: stands still in the warning pose, then attacks
     startBossWarning() {
         if (!this.boss || !this.boss.active) return;
 
         this.bossPhase      = 'warning';
         this.bossPhaseUntil = this.time.now + 600;
         this.boss.setVelocity(0, 0);
-        this.boss.play('boss_cairnback_warning');
+
+        const warnKey = this.bossAnimKey('warning');
+        if (warnKey) this.boss.play(warnKey);
 
         this.time.delayedCall(600, () => {
-            if (this.boss && this.boss.active && !this.gameOver) this.bossCharge();
+            if (this.boss && this.boss.active && !this.gameOver) this.bossAttack();
+        });
+    }
+
+    // The element's attack after the warning: Earth charges, Water rings the bell
+    bossAttack() {
+        if (!this.boss || !this.boss.active) return;
+
+        if (this.element === 'water') this.bellkeeperVolley();
+        else                          this.bossCharge();
+    }
+
+    // Bellkeeper: 12 water orbs, two consecutive ones missing (a 60° escape gap)
+    bellkeeperVolley() {
+        if (!this.boss || !this.boss.active) return;
+
+        this.bossCharging   = true;   // hold still while the ring launches
+        this.bossPhase      = 'attacking';
+        this.bossPhaseUntil = this.time.now + 500;
+        this.boss.setVelocity(0, 0);
+        this.boss.play('boss_bellkeeper_attack');
+
+        const step     = (Math.PI * 2) / 12;
+        const gapIndex = randomInt(0, 11);
+
+        for (let i = 0; i < 12; i++) {
+            // Two consecutive shots skipped → the gap is aimed at a random angle
+            if (i === gapIndex || i === (gapIndex + 1) % 12) continue;
+
+            const angle = i * step;
+            const orb = this.bossProjectiles.create(this.boss.x, this.boss.y, 'boss_ripple');
+            orb.setDepth(8);
+            orb.setVelocity(Math.cos(angle) * 200, Math.sin(angle) * 200);
+
+            this.time.delayedCall(2800, () => { if (orb.active) orb.destroy(); });
+        }
+
+        this.time.delayedCall(500, () => {
+            this.bossCharging = false;
+            if (this.boss && this.boss.active) this.startBossRecovery();
         });
     }
 
@@ -832,14 +899,14 @@ class ArenaBase extends Phaser.Scene {
         this.bossPhase      = 'recovery';
         this.bossPhaseUntil = this.time.now + 1200;
         this.boss.setVelocity(0, 0);
-        this.boss.play('boss_cairnback_recovery');
+        this.boss.play(this.bossAnimKey('recovery'));
 
         this.time.delayedCall(1200, () => {
             if (!this.boss || !this.boss.active) return;
 
             this.bossPhase      = 'idle';
             this.bossPhaseUntil = 0;
-            this.boss.play('boss_cairnback_idle');
+            this.boss.play(this.bossAnimKey('idle'));
         });
     }
 
@@ -917,7 +984,8 @@ class ArenaBase extends Phaser.Scene {
         if (!Number.isFinite(amount) || amount <= 0) return;
 
         // Cairnback's open shell is a weak spot: double damage during recovery
-        const damage = (this.element === 'earth' && this.bossPhase === 'recovery')
+        const damage = ((this.element === 'earth' || this.element === 'water') &&
+                        this.bossPhase === 'recovery')
             ? amount * 2
             : amount;
 
@@ -1039,6 +1107,7 @@ class ArenaBase extends Phaser.Scene {
 
         this.boss.destroy();
         this.boss = null;
+        if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
 
         const bossPoints = Math.round(100 * this.difficulty.scoreMultiplier);
         this.arenaScore += bossPoints;
@@ -1271,6 +1340,14 @@ class ArenaBase extends Phaser.Scene {
         this.damagePlayer(15);
     }
 
+    // Bellkeeper orb hits the player — routed through damagePlayer so i-frames,
+    // dash invincibility and Last Ember all behave exactly like other damage.
+    onPlayerBossProjectileOverlap(orb, player) {
+        if (!orb.active) return;
+        orb.destroy();
+        this.damagePlayer(10);
+    }
+
     // Projectile hits a normal enemy: destroy projectile, deal double attack damage
     onProjectileHitEnemy(projectile, enemy) {
         if (!projectile.active || !enemy.active) return;
@@ -1481,6 +1558,7 @@ class ArenaBase extends Phaser.Scene {
         this.player.setVelocity(0, 0);
         this.enemies.getChildren().forEach(e => e.setVelocity(0, 0));
         if (this.boss && this.boss.active) this.boss.setVelocity(0, 0);
+        if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
         if (this.spawnTimer) { this.spawnTimer.remove(); this.spawnTimer = null; }
 
         GameState.arenaData.kills = this.enemiesKilled;

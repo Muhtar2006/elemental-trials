@@ -116,6 +116,13 @@ class BootScene extends Phaser.Scene {
             frameHeight: 64,
         });
 
+        // The Bellkeeper, the Water boss — 7 frames in one row, 64×64 each.
+        // 0-3 idle loop, 4 warning, 5 attack, 6 recovery.
+        this.load.spritesheet('boss_water_bellkeeper', 'assets/boss_water_bellkeeper.png', {
+            frameWidth:  64,
+            frameHeight: 64,
+        });
+
         // Last Ember wing — 4 frames in one row, 48×64 each (same as the player)
         this.load.spritesheet('rage_wing', 'assets/rage_wing_sheet.png', {
             frameWidth:  48,
@@ -189,6 +196,37 @@ class BootScene extends Phaser.Scene {
             this.anims.create({
                 key: 'boss_cairnback_recovery',
                 frames: [{ key: 'boss_earth_cairnback', frame: 6 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+        }
+
+        // Bellkeeper animations — slow clapper idle, then one-shot poses
+        if (!this.anims.exists('boss_bellkeeper_idle')) {
+            this.anims.create({
+                key: 'boss_bellkeeper_idle',
+                frames: this.anims.generateFrameNumbers('boss_water_bellkeeper', { start: 0, end: 3 }),
+                frameRate: 4,
+                repeat: -1,
+            });
+
+            this.anims.create({
+                key: 'boss_bellkeeper_warning',
+                frames: [{ key: 'boss_water_bellkeeper', frame: 4 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_bellkeeper_attack',
+                frames: [{ key: 'boss_water_bellkeeper', frame: 5 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_bellkeeper_recovery',
+                frames: [{ key: 'boss_water_bellkeeper', frame: 6 }],
                 frameRate: 10,
                 repeat: 0,
             });
@@ -614,6 +652,9 @@ class BootScene extends Phaser.Scene {
 
         // Spark particle
         createParticleTexture(this, 'particle_spark', 0xffffaa, 3, 'circle');
+
+        // Bellkeeper projectile: small water orb (12×12)
+        createParticleTexture(this, 'boss_ripple', 0x66bbff, 6, 'circle');
     }
 
     generateSymbolTextures() {

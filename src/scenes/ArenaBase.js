@@ -54,6 +54,12 @@ class ArenaBase extends Phaser.Scene {
         this.isDashing        = false;
         this.isInvincible     = false;
 
+        // ---- Last Ember (once-per-arena rage) ----
+        this.rageUsed   = false;
+        this.rageActive = false;
+        this.rageUntil  = 0;
+        this._ragePulse = null;
+
         // ---- Boss state ----
         this.boss            = null;
         this.bossCharging    = false;
@@ -104,6 +110,9 @@ class ArenaBase extends Phaser.Scene {
         if (this.boss && this.boss.active) {
             this.updateBossAI(time, delta);
         }
+
+        // End Last Ember when its 6 s window closes
+        if (this.rageActive && this.time.now >= this.rageUntil) this.endLastEmber();
 
         this.updateUI();
         this.updateElementMechanic(time, delta);
@@ -253,6 +262,18 @@ class ArenaBase extends Phaser.Scene {
             fontFamily: 'Cinzel, serif', fontSize: '11px', color: '#88ddff',
             stroke: '#000000', strokeThickness: 1,
         }).setDepth(20);
+
+        // ---- Last Ember indicator (hidden until rage triggers) ----
+        this.rageBarBaseScale = 0.5;
+        this.rageBarBg = this.add.image(10, 96, 'bar_bg')
+            .setOrigin(0, 0).setDepth(20).setScale(this.rageBarBaseScale, 0.45).setVisible(false);
+        this.rageBarFill = this.add.image(10, 96, 'bar_power')
+            .setOrigin(0, 0).setDepth(21).setScale(0, 0.45).setVisible(false);
+        this.rageBarFill.setTint(0xff8a2a);
+        this.rageLabel = this.add.text(14, 94, 'LAST EMBER', {
+            fontFamily: 'Cinzel, serif', fontSize: '10px', color: '#ffb347',
+            stroke: '#000000', strokeThickness: 1,
+        }).setDepth(22).setVisible(false);
 
         // ---- Arena name (top-center) ----
         this.add.text(w / 2, 10, `${ELEMENT_NAMES[this.element]} ARENA`, {
@@ -412,14 +433,14 @@ class ArenaBase extends Phaser.Scene {
         this.enemies.getChildren().forEach(enemy => {
             if (!enemy.active) return;
             if (distanceBetween(px, py, enemy.x, enemy.y) <= this.effectiveAttackRange()) {
-                this.damageEnemy(enemy, PLAYER.ATTACK_DAMAGE);
+                this.damageEnemy(enemy, this.effectiveAttackDamage());
             }
         });
 
         // Hit boss (slightly larger hitbox since the sprite is 80×80)
         if (this.boss && this.boss.active) {
             if (distanceBetween(px, py, this.boss.x, this.boss.y) <= this.effectiveAttackRange() + 24) {
-                this.damageBoss(PLAYER.ATTACK_DAMAGE);
+                this.damageBoss(this.effectiveAttackDamage());
             }
         }
     }
@@ -877,12 +898,95 @@ class ArenaBase extends Phaser.Scene {
         this.sound.play('hurt', { volume: 0.45 });
 
         this.player.setTint(0xff3333);
-        this.time.delayedCall(200, () => { if (this.player.active) this.player.clearTint(); });
+        this.time.delayedCall(200, () => { if (this.player.active) this.applyPlayerTint(); });
         // Stronger shake than enemy hit to signal the player got hurt
         this.cameras.main.shake(120, 0.011);
         this.time.delayedCall(PLAYER.INVINCIBLE_MS, () => { this.isInvincible = false; });
 
-        if (this.playerHP <= 0) this.loseArena();
+        if (this.playerHP <= 0) { this.loseArena(); return; }
+
+        // Last Ember: fire once per arena at 25% HP or below
+        this.checkLastEmber();
+    }
+
+    // -------------------------------------------------------
+    //  LAST EMBER (once-per-arena rage)
+    // -------------------------------------------------------
+
+    // At or below 25% HP: once per arena, no re-trigger after it ends.
+    checkLastEmber() {
+        if (this.rageUsed || this.rageActive || this.gameOver) return;
+        if (this.playerHP <= 0) return;
+        if (this.playerHP > this.playerMaxHP * 0.25) return;
+        this.activateLastEmber();
+    }
+
+    activateLastEmber() {
+        this.rageUsed   = true;
+        this.rageActive = true;
+        this.rageUntil  = this.time.now + 6000;
+
+        playSpecial();
+        this.cameras.main.flash(160, 255, 140, 40, false);
+        this.cameras.main.shake(160, 0.006);
+
+        this.applyPlayerTint();
+
+        // Steady amber pulse while the ember burns
+        this._ragePulse = this.tweens.add({
+            targets:  this.player,
+            alpha:    0.82,
+            duration: 260,
+            yoyo:     true,
+            repeat:   -1,
+            ease:     'Sine.easeInOut',
+        });
+
+        this.pushEnemiesAway(220, 320);
+
+        this.rageLabel.setVisible(true);
+        this.rageBarBg.setVisible(true);
+        this.rageBarFill.setVisible(true);
+    }
+
+    endLastEmber() {
+        if (!this.rageActive) return;
+
+        this.rageActive = false;
+        this.rageUntil  = 0;
+
+        if (this._ragePulse) { this._ragePulse.stop(); this._ragePulse = null; }
+
+        if (this.player && this.player.active) {
+            this.player.setAlpha(1);
+            this.player.clearTint();
+        }
+
+        this.rageLabel.setVisible(false);
+        this.rageBarBg.setVisible(false);
+        this.rageBarFill.setVisible(false);
+    }
+
+    // Restore the amber rage tint after a hit/burn flash instead of clearing
+    applyPlayerTint() {
+        if (!this.player || !this.player.active) return;
+        if (this.rageActive) this.player.setTint(0xffb347);
+        else                 this.player.clearTint();
+    }
+
+    // Radial shove — normal enemies only; the boss is too heavy to move
+    pushEnemiesAway(radius, force) {
+        const px = this.player.x;
+        const py = this.player.y;
+
+        this.enemies.getChildren().forEach(enemy => {
+            if (!enemy.active) return;
+            if (distanceBetween(px, py, enemy.x, enemy.y) > radius) return;
+
+            const a = angleBetween(px, py, enemy.x, enemy.y);
+            enemy.setVelocity(Math.cos(a) * force, Math.sin(a) * force);
+            enemy.knockbackUntil = this.time.now + 250;
+        });
     }
 
     // -------------------------------------------------------
@@ -903,14 +1007,14 @@ class ArenaBase extends Phaser.Scene {
     onProjectileHitEnemy(projectile, enemy) {
         if (!projectile.active || !enemy.active) return;
         projectile.destroy();
-        this.damageEnemy(enemy, PLAYER.ATTACK_DAMAGE * 2);
+        this.damageEnemy(enemy, this.effectiveAttackDamage() * 2);
     }
 
     // Projectile hits the boss: destroy projectile, deal double attack damage
     onProjectileHitBoss(boss, projectile) {
         if (!projectile.active || !boss.active) return;
         projectile.destroy();
-        this.damageBoss(PLAYER.ATTACK_DAMAGE * 2);
+        this.damageBoss(this.effectiveAttackDamage() * 2);
     }
 
     // -------------------------------------------------------
@@ -978,6 +1082,13 @@ class ArenaBase extends Phaser.Scene {
             this._restorePulse.stop();
             this._restorePulse = null;
             this.hpRestoreHint.setAlpha(0.3).setColor('#555555');
+        }
+
+        // Last Ember countdown bar
+        if (this.rageActive) {
+            const remainMs = Math.max(0, this.rageUntil - this.time.now);
+            this.rageLabel.setText(`LAST EMBER  ${(remainMs / 1000).toFixed(1)}s`);
+            this.rageBarFill.setScale(this.rageBarBaseScale * (remainMs / 6000), 0.45);
         }
 
         // Fireball indicator: bright orange when ready, dim when on cooldown.
@@ -1094,6 +1205,9 @@ class ArenaBase extends Phaser.Scene {
     loseArena() {
         if (this.gameOver) return;
         this.gameOver = true;
+
+        // Rage must not outlive the run
+        this.endLastEmber();
 
         // Freeze all physics bodies
         this.player.setVelocity(0, 0);
@@ -1535,8 +1649,9 @@ class ArenaBase extends Phaser.Scene {
             this.playerHP = Math.max(0, this.playerHP - 3);
             // Brief orange tint to signal burn (doesn't interfere with enemy-hit red)
             this.player.setTint(0xff7700);
-            this.time.delayedCall(140, () => { if (this.player.active) this.player.clearTint(); });
+            this.time.delayedCall(140, () => { if (this.player.active) this.applyPlayerTint(); });
             if (this.playerHP <= 0) this.loseArena();
+            else this.checkLastEmber();
         }
     }
 
@@ -1706,11 +1821,14 @@ class ArenaBase extends Phaser.Scene {
     //  UPGRADE-AWARE EFFECTIVE STATS
     // -------------------------------------------------------
 
-    effectiveSpeed()            { return PLAYER.SPEED         * (GameState.hasUpgrade('move_speed')        ? 1.2 : 1); }
+    effectiveSpeed()            { return PLAYER.SPEED         * (GameState.hasUpgrade('move_speed')        ? 1.2 : 1) * (this.rageActive ? 1.1 : 1); }
+    // Last Ember gives a flat +1 sword damage (1 → 2) and +25% fireball damage,
+    // so the boost actually changes hits-to-kill against 1-3 HP enemies.
+    effectiveAttackDamage()     { return PLAYER.ATTACK_DAMAGE + (this.rageActive ? 1 : 0); }
     effectiveAttackRange()      { return PLAYER.ATTACK_RANGE  * (GameState.hasUpgrade('sword_range')       ? 1.3 : 1); }
     effectiveDashCooldown()     { return PLAYER.DASH_COOLDOWN * (GameState.hasUpgrade('dash_cooldown')     ? 0.6 : 1); }
     effectiveFireballCooldown() { return 1500                 * (GameState.hasUpgrade('fireball_cooldown') ? 0.7 : 1); }
-    effectiveFireballDamage()   { return Math.round(PLAYER.FIREBALL_DAMAGE  * (GameState.hasUpgrade('fireball_damage') ? 1.5 : 1)); }
+    effectiveFireballDamage()   { return Math.round(PLAYER.FIREBALL_DAMAGE  * (GameState.hasUpgrade('fireball_damage') ? 1.5 : 1) * (this.rageActive ? 1.25 : 1)); }
     effectiveFreezeDuration()   { return GameState.hasUpgrade('freeze_duration') ? 5000 : 3000; }
     effectiveIcePierce()        { return GameState.hasUpgrade('ice_pierce') ? 2 : 1; }
 

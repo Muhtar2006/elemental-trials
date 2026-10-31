@@ -72,6 +72,7 @@ class ArenaBase extends Phaser.Scene {
         this.diveTargetX     = 0;
         this.diveTargetY     = 0;
         this._shadowLockAt   = 0;
+        this._warnFlashTimer = null;
 
         // Build the scene
         this.createBackground(w, h);
@@ -426,6 +427,9 @@ class ArenaBase extends Phaser.Scene {
 
     // WASD movement with diagonal normalisation and directional animation
     handleMovement() {
+        // Never let a missing/destroyed player sprite kill the whole update loop
+        if (!this.player || !this.player.active || !this.player.anims) return;
+
         if (this.isDashing) return;
         if (this.time.now < (this._recoilUntil || 0)) return; // brief post-cast lock
 
@@ -791,14 +795,13 @@ class ArenaBase extends Phaser.Scene {
         }
         if (this.boss.frozenUntil && this.time.now >= this.boss.frozenUntil) {
             this.boss.frozenUntil = 0;
-            if (this.bossTint) this.boss.setTint(this.bossTint);
-            else               this.boss.clearTint();
+            this.applyBossTint();
         }
 
         if (this.bossCharging) return;
 
         // Cairnback and the Bellkeeper hold still during warning and recovery poses
-        if ((this.element === 'earth' || this.element === 'water' || this.element === 'air') &&
+        if ((this.element === 'earth' || this.element === 'water' || this.element === 'air' || this.element === 'fire') &&
             (this.bossPhase === 'warning' || this.bossPhase === 'recovery')) {
             this.boss.setVelocity(0, 0);
             return;
@@ -815,8 +818,8 @@ class ArenaBase extends Phaser.Scene {
 
         if (time - this._lastBossCharge > 4000) {
             this._lastBossCharge = time;
-            if (this.element === 'earth') this.startBossWarning();
-            else                          this.bossCharge();
+            // Every element now has a telegraphed warning before its attack
+            this.startBossWarning();
         }
     }
 
@@ -824,6 +827,12 @@ class ArenaBase extends Phaser.Scene {
     bossCharge() {
         if (!this.boss || !this.boss.active) return;
         this.bossCharging = true;
+
+        // The charge ends the tell: kill the flash and drop back to normal colors
+        if (this.element === 'fire') {
+            this.stopFireWarningFlash();
+            this.applyBossTint();
+        }
 
         // Earth runs the telegraphed cycle
         if (this.element === 'earth') {
@@ -841,8 +850,10 @@ class ArenaBase extends Phaser.Scene {
         this.time.delayedCall(650, () => {
             this.bossCharging = false;
 
-            // Unique boss art drops into the open-shell recovery after every attack
-            if (this.element === 'earth' || this.element === 'water' || this.element === 'air') this.startBossRecovery();
+            // Every boss drops into the open-shell recovery after its attack
+            if (this.element === 'earth' || this.element === 'water' || this.element === 'air' || this.element === 'fire') {
+                this.startBossRecovery();
+            }
         });
     }
 
@@ -852,6 +863,48 @@ class ArenaBase extends Phaser.Scene {
         if (this.element === 'water') return `boss_bellkeeper_${suffix}`;
         if (this.element === 'air')   return `boss_hushwing_${suffix}`;
         return null;
+    }
+
+    // Current baseline tint: the phase tell wins over the element tint
+    bossPhaseTint() {
+        if (this.element === 'fire' && this.bossPhase === 'recovery') return 0x777777;
+        return this.bossTint;
+    }
+
+    // Restore whatever tint the boss should currently have (after a white flash,
+    // a freeze, or a phase change). Fire's natural colors = clearTint.
+    applyBossTint() {
+        if (!this.boss || !this.boss.active) return;
+
+        const tint = this.bossPhaseTint();
+        if (tint) this.boss.setTint(tint);
+        else      this.boss.clearTint();
+    }
+
+    // Fire has no unique warning pose, so it flashes orange instead
+    startFireWarningFlash(durationMs) {
+        this.stopFireWarningFlash();
+
+        const beat = 150;
+        let on = false;
+
+        this._warnFlashTimer = this.time.addEvent({
+            delay: beat,
+            repeat: Math.ceil(durationMs / beat) - 1,
+            callback: () => {
+                if (!this.boss || !this.boss.active) return;
+                on = !on;
+                if (on) this.boss.setTint(0xff8800);
+                else    this.applyBossTint();
+            },
+        });
+    }
+
+    stopFireWarningFlash() {
+        if (this._warnFlashTimer) {
+            this._warnFlashTimer.remove();
+            this._warnFlashTimer = null;
+        }
     }
 
     // Wind-up: stands still in the warning pose, then attacks
@@ -870,6 +923,9 @@ class ArenaBase extends Phaser.Scene {
 
         // Air: the marker chases the player for 0.5 s, then locks in place
         if (this.element === 'air') this.spawnDiveShadow(500);
+
+        // Fire: orange stutter as the tell
+        if (this.element === 'fire') this.startFireWarningFlash(warnMs);
 
         this.time.delayedCall(warnMs, () => {
             if (this.boss && this.boss.active && !this.gameOver) this.bossAttack();
@@ -986,14 +1042,22 @@ class ArenaBase extends Phaser.Scene {
         this.bossPhase      = 'recovery';
         this.bossPhaseUntil = this.time.now + 1200;
         this.boss.setVelocity(0, 0);
-        this.boss.play(this.bossAnimKey('recovery'));
+
+        const recoveryKey = this.bossAnimKey('recovery');
+        if (recoveryKey) this.boss.play(recoveryKey);
+
+        // Fire shows its weak spot as a burned-out grey for the whole window
+        if (this.element === 'fire') this.boss.setTint(0x777777);
 
         this.time.delayedCall(1200, () => {
             if (!this.boss || !this.boss.active) return;
 
             this.bossPhase      = 'idle';
             this.bossPhaseUntil = 0;
-            this.boss.play(this.bossAnimKey('idle'));
+
+            const idleKey = this.bossAnimKey('idle');
+            if (idleKey) this.boss.play(idleKey);
+            if (this.element === 'fire') this.applyBossTint();
         });
     }
 
@@ -1071,7 +1135,7 @@ class ArenaBase extends Phaser.Scene {
         if (!Number.isFinite(amount) || amount <= 0) return;
 
         // Cairnback's open shell is a weak spot: double damage during recovery
-        const damage = ((this.element === 'earth' || this.element === 'water' || this.element === 'air') &&
+        const damage = ((this.element === 'earth' || this.element === 'water' || this.element === 'air' || this.element === 'fire') &&
                         this.bossPhase === 'recovery')
             ? amount * 2
             : amount;
@@ -1085,10 +1149,8 @@ class ArenaBase extends Phaser.Scene {
             if (this.boss && this.boss.active) {
                 if (this.boss.frozenUntil && this.time.now < this.boss.frozenUntil) {
                     this.boss.setTint(0x88ddff);
-                } else if (this.bossTint) {
-                    this.boss.setTint(this.bossTint);
                 } else {
-                    this.boss.clearTint();
+                    this.applyBossTint();
                 }
             }
         });
@@ -1196,6 +1258,7 @@ class ArenaBase extends Phaser.Scene {
         this.boss = null;
         if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
         this.clearDiveShadow();
+        this.stopFireWarningFlash();
 
         const bossPoints = Math.round(100 * this.difficulty.scoreMultiplier);
         this.arenaScore += bossPoints;
@@ -1430,7 +1493,9 @@ class ArenaBase extends Phaser.Scene {
 
     // Bellkeeper orb hits the player — routed through damagePlayer so i-frames,
     // dash invincibility and Last Ember all behave exactly like other damage.
-    onPlayerBossProjectileOverlap(orb, player) {
+    // Arcade calls sprite-vs-group overlaps as (sprite, groupMember) regardless of
+    // the order passed to physics.add.overlap(), so this is (player, orb).
+    onPlayerBossProjectileOverlap(player, orb) {
         if (!orb.active) return;
         orb.destroy();
         this.damagePlayer(10);
@@ -1648,6 +1713,7 @@ class ArenaBase extends Phaser.Scene {
         if (this.boss && this.boss.active) this.boss.setVelocity(0, 0);
         if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
         this.clearDiveShadow();
+        this.stopFireWarningFlash();
         if (this.spawnTimer) { this.spawnTimer.remove(); this.spawnTimer = null; }
 
         GameState.arenaData.kills = this.enemiesKilled;

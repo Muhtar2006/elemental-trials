@@ -66,6 +66,8 @@ class ArenaBase extends Phaser.Scene {
         this.boss            = null;
         this.bossCharging    = false;
         this._lastBossCharge = 0;
+        this.bossPhase       = 'idle';   // earth: idle → warning → charging → recovery
+        this.bossPhaseUntil  = 0;
 
         // Build the scene
         this.createBackground(w, h);
@@ -759,6 +761,14 @@ class ArenaBase extends Phaser.Scene {
         }
 
         if (this.bossCharging) return;
+
+        // Cairnback holds still during his warning and recovery poses
+        if (this.element === 'earth' &&
+            (this.bossPhase === 'warning' || this.bossPhase === 'recovery')) {
+            this.boss.setVelocity(0, 0);
+            return;
+        }
+
         // Let knockback play out before resuming steering
         if (this.boss.knockbackUntil && this.time.now < this.boss.knockbackUntil) return;
 
@@ -770,7 +780,8 @@ class ArenaBase extends Phaser.Scene {
 
         if (time - this._lastBossCharge > 4000) {
             this._lastBossCharge = time;
-            this.bossCharge();
+            if (this.element === 'earth') this.startBossWarning();
+            else                          this.bossCharge();
         }
     }
 
@@ -779,13 +790,57 @@ class ArenaBase extends Phaser.Scene {
         if (!this.boss || !this.boss.active) return;
         this.bossCharging = true;
 
+        // Earth runs the telegraphed cycle
+        if (this.element === 'earth') {
+            this.bossPhase      = 'charging';
+            this.bossPhaseUntil = this.time.now + 650;
+            this.boss.play('boss_cairnback_charge');
+        }
+
         const angle = angleBetween(this.boss.x, this.boss.y, this.player.x, this.player.y);
         this.boss.setVelocity(
             Math.cos(angle) * this.difficulty.enemySpeed * 3.2,
             Math.sin(angle) * this.difficulty.enemySpeed * 3.2
         );
 
-        this.time.delayedCall(650, () => { this.bossCharging = false; });
+        this.time.delayedCall(650, () => {
+            this.bossCharging = false;
+
+            // Earth drops into the open-shell recovery after every charge
+            if (this.element === 'earth') this.startBossRecovery();
+        });
+    }
+
+    // 0.6 s wind-up: head lowered, standing still, then the charge
+    startBossWarning() {
+        if (!this.boss || !this.boss.active) return;
+
+        this.bossPhase      = 'warning';
+        this.bossPhaseUntil = this.time.now + 600;
+        this.boss.setVelocity(0, 0);
+        this.boss.play('boss_cairnback_warning');
+
+        this.time.delayedCall(600, () => {
+            if (this.boss && this.boss.active && !this.gameOver) this.bossCharge();
+        });
+    }
+
+    // 1.2 s open shell: stands still and takes double damage
+    startBossRecovery() {
+        if (!this.boss || !this.boss.active) return;
+
+        this.bossPhase      = 'recovery';
+        this.bossPhaseUntil = this.time.now + 1200;
+        this.boss.setVelocity(0, 0);
+        this.boss.play('boss_cairnback_recovery');
+
+        this.time.delayedCall(1200, () => {
+            if (!this.boss || !this.boss.active) return;
+
+            this.bossPhase      = 'idle';
+            this.bossPhaseUntil = 0;
+            this.boss.play('boss_cairnback_idle');
+        });
     }
 
     // -------------------------------------------------------
@@ -797,7 +852,7 @@ class ArenaBase extends Phaser.Scene {
     // (and returns to neutral) while the boss is charging or frozen.
     updateBossBreath(delta) {
         const frozen = this.boss.frozenUntil && this.time.now < this.boss.frozenUntil;
-        const breathing = !this.bossCharging && !frozen;
+        const breathing = this.bossPhase === 'idle' && !this.bossCharging && !frozen;
 
         if (!breathing) {
             this._breathPhase = 0;
@@ -860,7 +915,13 @@ class ArenaBase extends Phaser.Scene {
     damageBoss(amount) {
         if (!this.boss || !this.boss.active) return;
         if (!Number.isFinite(amount) || amount <= 0) return;
-        this.boss.hp -= amount;
+
+        // Cairnback's open shell is a weak spot: double damage during recovery
+        const damage = (this.element === 'earth' && this.bossPhase === 'recovery')
+            ? amount * 2
+            : amount;
+
+        this.boss.hp -= damage;
         this.sound.play('hit', { volume: 0.3 });
 
         // White flash for 60 ms, then restore tint (ice blue if still frozen, element/clear otherwise)
@@ -885,7 +946,7 @@ class ArenaBase extends Phaser.Scene {
         this.cameras.main.shake(70, 0.005);
         this.hitStop(40);
 
-        this.showDamageNumber(this.boss.x, this.boss.y - 30, amount);
+        this.showDamageNumber(this.boss.x, this.boss.y - 30, damage);
         this.updateBossHPBar();
 
         if (this.boss.hp <= 0) this.killBoss();

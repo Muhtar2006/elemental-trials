@@ -116,6 +116,18 @@ class BootScene extends Phaser.Scene {
             frameHeight: 64,
         });
 
+        // Last Ember wing — 4 frames in one row, 48×64 each (same as the player)
+        this.load.spritesheet('rage_wing', 'assets/rage_wing_sheet.png', {
+            frameWidth:  48,
+            frameHeight: 64,
+        });
+
+        // Last Ember wing animation sheet — 8 frames: 0-3 unfold, 4-7 flap
+        this.load.spritesheet('rage_wing_anim', 'assets/rage_wing_anim_sheet.png', {
+            frameWidth:  48,
+            frameHeight: 64,
+        });
+
         // Insect enemy spritesheets — 32×32 frames, 4 frames per sheet
         this.load.spritesheet('insect_beetle', 'assets/insects/BeetleMove.png', { frameWidth: 32, frameHeight: 32 });
         this.load.spritesheet('insect_maggot', 'assets/insects/MaggotWalk.png', { frameWidth: 32, frameHeight: 32 });
@@ -178,6 +190,36 @@ class BootScene extends Phaser.Scene {
                 key: 'boss_cairnback_recovery',
                 frames: [{ key: 'boss_earth_cairnback', frame: 6 }],
                 frameRate: 10,
+                repeat: 0,
+            });
+        }
+
+        // Last Ember wing loop: 4 frames at 8 fps
+        if (!this.anims.exists('rage_wing')) {
+            this.anims.create({
+                key: 'rage_wing',
+                frames: this.anims.generateFrameNumbers('rage_wing', { start: 0, end: 3 }),
+                frameRate: 8,
+                repeat: -1,
+            });
+        }
+
+        // Bud → fully open, played once when rage starts
+        if (!this.anims.exists('rage_wing_unfold')) {
+            this.anims.create({
+                key: 'rage_wing_unfold',
+                frames: this.anims.generateFrameNumbers('rage_wing_anim', { start: 0, end: 3 }),
+                frameRate: 10,
+                repeat: 0,
+            });
+        }
+
+        // One wingbeat, played once per dash: open → down → up → open
+        if (!this.anims.exists('rage_wing_flap')) {
+            this.anims.create({
+                key: 'rage_wing_flap',
+                frames: this.anims.generateFrameNumbers('rage_wing_anim', { start: 4, end: 7 }),
+                frameRate: 16,
                 repeat: 0,
             });
         }

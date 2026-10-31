@@ -313,6 +313,7 @@ function drawStar(graphics, cx, cy, points, outerR, innerR) {
 // ---- Global Game State ----
 
 const GameState = {
+    debug: false,              // true only when the page loads with ?debug=1
     completedElements: [],     // ['fire', 'water', ...]
     totalKills: 0,
     totalBossesDefeated: 0,

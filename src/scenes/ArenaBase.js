@@ -59,6 +59,8 @@ class ArenaBase extends Phaser.Scene {
         this.rageActive = false;
         this.rageUntil  = 0;
         this._ragePulse = null;
+        this.rageWings   = [];
+        this._dashEmbers = null;
 
         // ---- Boss state ----
         this.boss            = null;
@@ -88,6 +90,10 @@ class ArenaBase extends Phaser.Scene {
 
         this.cameras.main.fadeIn(600, 10, 10, 15);
         this.input.keyboard.on('keydown-ESC', () => this.togglePause());
+
+        // The wing is synced after physics so it matches the player's rendered position
+        this.events.off('postupdate', this.syncRageWing, this);
+        this.events.on('postupdate', this.syncRageWing, this);
     }
 
     update(time, delta) {
@@ -325,6 +331,47 @@ class ArenaBase extends Phaser.Scene {
             fireball:  Phaser.Input.Keyboard.KeyCodes.F,
             iceShard:  Phaser.Input.Keyboard.KeyCodes.C,
         });
+
+        // Debug keys — only wired when the page is loaded with ?debug=1
+        if (GameState.debug) {
+            this.input.keyboard.on('keydown-NINE',  () => this.debugRage());
+            this.input.keyboard.on('keydown-ZERO',  () => this.debugSpawnBoss());
+            this.input.keyboard.on('keydown-SEVEN', () => this.debugEarthArena());
+            this.input.keyboard.on('keydown-EIGHT', () => this.debugWin());
+        }
+    }
+
+    // -------------------------------------------------------
+    //  DEBUG KEYS (?debug=1 only)
+    // -------------------------------------------------------
+
+    // 9 — drop to 25% HP and fire Last Ember (repeatable in the same arena)
+    debugRage() {
+        if (this.gameOver || this.rageActive) return;
+
+        this.playerHP = Math.ceil(this.playerMaxHP * 0.25);
+        this.rageUsed = false;
+        this.checkLastEmber();
+    }
+
+    // 0 — bring the boss in immediately
+    debugSpawnBoss() {
+        if (this.gameOver) return;
+        this.spawnBoss();
+    }
+
+    // 7 — jump straight to the Earth arena
+    debugEarthArena() {
+        GameState.currentElement = 'earth';
+        GameState.arenaData = { kills: 0, score: 0, bossDefeated: false, hpRestoresUsed: 0 };
+        this.cameras.main.fadeOut(400, 0, 0, 0);
+        this.time.delayedCall(400, () => this.scene.start('ArenaEarthScene'));
+    }
+
+    // 8 — jump straight to the win screen
+    debugWin() {
+        this.cameras.main.fadeOut(400, 0, 0, 0);
+        this.time.delayedCall(400, () => this.scene.start('WinScene'));
     }
 
     // Persistent overlap checks — enemy-to-boss overlaps are wired in spawnBoss()
@@ -496,6 +543,12 @@ class ArenaBase extends Phaser.Scene {
         this.isDashing     = true;
         this.isInvincible  = true;
         playDash();
+
+        // Last Ember: one wingbeat and a short ember trail (dash stats untouched)
+        if (this.rageActive) {
+            this.flapRageWings();
+            this.startDashEmbers();
+        }
 
         // Dash in current direction; default forward if stationary
         const rawVx = this.player.body.velocity.x || PLAYER.DASH_SPEED;
@@ -739,38 +792,24 @@ class ArenaBase extends Phaser.Scene {
     //  CAIRNBACK BREATHING
     // -------------------------------------------------------
 
-    // Idle "breathing": a 2 px rise and fall, one breath every 1.5 s.
-    // Whole-pixel offsets only; the bob pauses (and returns to neutral)
-    // while the boss is charging or frozen.
+    // Idle "breathing": a 4 px rise and fall in 2 px steps (0, -2, -4, -2, 0),
+    // one breath every 1.5 s. Cairnback is drawn at scale 2. The bob pauses
+    // (and returns to neutral) while the boss is charging or frozen.
     updateBossBreath(delta) {
         const frozen = this.boss.frozenUntil && this.time.now < this.boss.frozenUntil;
         const breathing = !this.bossCharging && !frozen;
 
-        // --- TEMPORARY DEBUG: remove after testing ---
-        const BREATH_PX = 20;
-        // ----------------------------------------------
-
         if (!breathing) {
-            if (!this._breathWasPaused) {
-                console.log('breath paused', this.bossCharging ? '(charging)' : '(frozen)');
-                this._breathWasPaused = true;
-            }
             this._breathPhase = 0;
             this.applyBossBreathOffset(0);
             return;
         }
 
-        this._breathWasPaused = false;
+        this._breathPhase = (this._breathPhase + delta) % 1500;
 
-        const prevPhase = this._breathPhase;
-        this._breathPhase = (prevPhase + delta) % 1500;
-
-        // TEMPORARY DEBUG: one line per completed breath
-        if (this._breathPhase < prevPhase) console.log('breath tick');
-
-        const t = this._breathPhase / 1500;                    // 0 → 1 across one breath
-        const lift = (1 - Math.cos(t * Math.PI * 2)) / 2;      // 0 → 1 → 0
-        this.applyBossBreathOffset(-Math.round(lift * BREATH_PX));
+        const t = this._breathPhase / 1500;                       // 0 → 1 across one breath
+        const lift = (1 - Math.cos(t * Math.PI * 2)) / 2;         // 0 → 1 → 0
+        this.applyBossBreathOffset(-Math.round(lift * 2) * 2);    // 0, -2, -4, -2, 0
     }
 
     // Move sprite and body together by the same delta, so the bob is purely
@@ -1009,6 +1048,24 @@ class ArenaBase extends Phaser.Scene {
 
         this.pushEnemiesAway(220, 320);
 
+        // Twin wings behind the player: depth 9.9 sits above enemies (9), below the player (10).
+        // One is mirrored so the pair spreads to both sides.
+        this.rageWings.forEach(w => w.destroy());
+        this.rageWings = [0, 1].map(() =>
+            this.add.sprite(this.player.x, this.player.y, 'rage_wing')
+                .setDepth(9.9)
+                .setScale(this.playerBaseScale)
+                .setAlpha(0)
+        );
+        this.rageWings.forEach(wing => {
+            // Unfold once, then settle into the flicker loop
+            wing.play('rage_wing_unfold');
+            wing.once('animationcomplete-rage_wing_unfold', () => {
+                if (this.rageActive && this.rageWings.includes(wing)) wing.play('rage_wing');
+            });
+            this.tweens.add({ targets: wing, alpha: 1, duration: 120 });
+        });
+
         this.rageLabel.setVisible(true);
         this.rageBarBg.setVisible(true);
         this.rageBarFill.setVisible(true);
@@ -1030,6 +1087,91 @@ class ArenaBase extends Phaser.Scene {
         this.rageLabel.setVisible(false);
         this.rageBarBg.setVisible(false);
         this.rageBarFill.setVisible(false);
+
+        this.hideRageWing();
+
+        // Cut the ember trail immediately
+        this.stopDashEmbers();
+    }
+
+    // Glue the wing to the player's frame: position, scale and left/right mirror.
+    // Runs on postupdate so it matches the player's rendered position exactly.
+    syncRageWing() {
+        if (!this.rageWings || this.rageWings.length === 0) return;
+        if (!this.player || !this.player.active) return;
+
+        // Facing left mirrors the pair; the second wing always mirrors the first
+        const mirrored = this.facing.startsWith('Left');
+
+        this.rageWings.forEach((wing, i) => {
+            if (!wing.visible) return;
+
+            wing.setPosition(this.player.x, this.player.y);
+            wing.setScale(this.player.scaleX, this.player.scaleY);
+            wing.setFlipX(i === 0 ? mirrored : !mirrored);
+        });
+    }
+
+    // Short fade, then destroy — no dangling sprite when rage ends or the run does
+    hideRageWing() {
+        if (!this.rageWings || this.rageWings.length === 0) return;
+
+        const wings = this.rageWings;
+        this.rageWings = [];
+
+        wings.forEach(wing => {
+            this.tweens.add({
+                targets: wing,
+                alpha: 0,
+                duration: 150,
+                onComplete: () => wing.destroy(),
+            });
+        });
+    }
+
+    // One wingbeat on dash: play the flap frames once, then back to the loop
+    flapRageWings() {
+        if (!this.rageWings || this.rageWings.length === 0) return;
+
+        this.rageWings.forEach(wing => {
+            if (!wing.active) return;
+
+            wing.off('animationcomplete-rage_wing_flap');
+            wing.play('rage_wing_flap');
+            wing.once('animationcomplete-rage_wing_flap', () => {
+                if (this.rageActive && this.rageWings.includes(wing)) wing.play('rage_wing');
+            });
+        });
+    }
+
+    // Short ember trail behind the player while dashing in rage
+    startDashEmbers() {
+        if (this._dashEmbers) return;
+
+        this._dashEmbers = this.add.particles(0, 0, 'particle_circle', {
+            follow:    this.player,
+            speed:     { min: 10, max: 60 },
+            scale:     { start: 0.6, end: 0 },
+            alpha:     { start: 0.9, end: 0 },
+            lifespan:  260,
+            frequency: 18,
+            quantity:  1,
+            tint:      [0xf77622, 0xfeae34, 0xfee761],
+            blendMode: 'ADD',
+        });
+        this._dashEmbers.setDepth(9.5);
+
+        this.time.delayedCall(PLAYER.DASH_DURATION, () => this.stopDashEmbers());
+    }
+
+    stopDashEmbers() {
+        if (!this._dashEmbers) return;
+
+        const embers = this._dashEmbers;
+        this._dashEmbers = null;
+
+        embers.stop();
+        this.time.delayedCall(320, () => embers.destroy());
     }
 
     // Restore the amber rage tint after a hit/burn flash instead of clearing

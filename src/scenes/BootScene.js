@@ -123,6 +123,13 @@ class BootScene extends Phaser.Scene {
             frameHeight: 64,
         });
 
+        // Hushwing, the Air boss — 7 frames in one row, 64×64 each.
+        // 0-3 idle loop, 4 warning, 5 dive, 6 recovery.
+        this.load.spritesheet('boss_air_hushwing', 'assets/boss_air_hushwing.png', {
+            frameWidth:  64,
+            frameHeight: 64,
+        });
+
         // Last Ember wing — 4 frames in one row, 48×64 each (same as the player)
         this.load.spritesheet('rage_wing', 'assets/rage_wing_sheet.png', {
             frameWidth:  48,
@@ -227,6 +234,37 @@ class BootScene extends Phaser.Scene {
             this.anims.create({
                 key: 'boss_bellkeeper_recovery',
                 frames: [{ key: 'boss_water_bellkeeper', frame: 6 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+        }
+
+        // Hushwing animations — quick idle flutter, then the dive poses
+        if (!this.anims.exists('boss_hushwing_idle')) {
+            this.anims.create({
+                key: 'boss_hushwing_idle',
+                frames: this.anims.generateFrameNumbers('boss_air_hushwing', { start: 0, end: 3 }),
+                frameRate: 5,
+                repeat: -1,
+            });
+
+            this.anims.create({
+                key: 'boss_hushwing_warning',
+                frames: [{ key: 'boss_air_hushwing', frame: 4 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_hushwing_dive',
+                frames: [{ key: 'boss_air_hushwing', frame: 5 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_hushwing_recovery',
+                frames: [{ key: 'boss_air_hushwing', frame: 6 }],
                 frameRate: 10,
                 repeat: 0,
             });

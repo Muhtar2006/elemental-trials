@@ -66,8 +66,12 @@ class ArenaBase extends Phaser.Scene {
         this.boss            = null;
         this.bossCharging    = false;
         this._lastBossCharge = 0;
-        this.bossPhase       = 'idle';   // earth: idle → warning → charging → recovery
+        this.bossPhase       = 'idle';   // idle → warning → attacking → recovery
         this.bossPhaseUntil  = 0;
+        this.diveShadow      = null;     // air boss ground marker
+        this.diveTargetX     = 0;
+        this.diveTargetY     = 0;
+        this._shadowLockAt   = 0;
 
         // Build the scene
         this.createBackground(w, h);
@@ -118,6 +122,7 @@ class ArenaBase extends Phaser.Scene {
         if (this.boss && this.boss.active) {
             this.updateBossAI(time, delta);
             if (this.element === 'earth') this.updateBossBreath(delta);
+            if (this.element === 'air')   this.updateDiveShadow();
         }
 
         // End Last Ember when its 6 s window closes
@@ -339,6 +344,7 @@ class ArenaBase extends Phaser.Scene {
         if (GameState.debug) {
             this.input.keyboard.on('keydown-NINE',  () => this.debugRage());
             this.input.keyboard.on('keydown-ZERO',  () => this.debugSpawnBoss());
+            this.input.keyboard.on('keydown-FIVE',  () => this.debugAirArena());
             this.input.keyboard.on('keydown-SIX',   () => this.debugWaterArena());
             this.input.keyboard.on('keydown-SEVEN', () => this.debugEarthArena());
             this.input.keyboard.on('keydown-EIGHT', () => this.debugWin());
@@ -362,6 +368,14 @@ class ArenaBase extends Phaser.Scene {
     debugSpawnBoss() {
         if (this.gameOver) return;
         this.spawnBoss();
+    }
+
+    // 5 — jump straight to the Air arena
+    debugAirArena() {
+        GameState.currentElement = 'air';
+        GameState.arenaData = { kills: 0, score: 0, bossDefeated: false, hpRestoresUsed: 0 };
+        this.cameras.main.fadeOut(400, 0, 0, 0);
+        this.time.delayedCall(400, () => this.scene.start('ArenaAirScene'));
     }
 
     // 6 — jump straight to the Water arena
@@ -653,11 +667,13 @@ class ArenaBase extends Phaser.Scene {
         const w = this.cameras.main.width;
         const h = this.cameras.main.height;
 
-        // Earth and Water have unique art; Fire and Air still use the tinted fire skull
+        // Earth, Water and Air have unique art; Fire keeps the tinted skull
         const isCairnback  = this.element === 'earth';
         const isBellkeeper = this.element === 'water';
+        const isHushwing   = this.element === 'air';
         const bossTexture  = isCairnback  ? 'boss_earth_cairnback'
                            : isBellkeeper ? 'boss_water_bellkeeper'
+                           : isHushwing   ? 'boss_air_hushwing'
                            : 'boss_sprite';
 
         this.boss = this.physics.add.sprite(w / 2, 130, bossTexture);
@@ -670,7 +686,7 @@ class ArenaBase extends Phaser.Scene {
 
         // Cairnback renders at scale 2 (128 px) but keeps the old boss's 96×96
         // on-screen hitbox, so overlap behaviour is unchanged.
-        if (isCairnback || isBellkeeper) {
+        if (isCairnback || isBellkeeper || isHushwing) {
             this.boss.body.setSize(48, 48, true);
             this.boss.play(this.bossAnimKey('idle'));
         }
@@ -684,7 +700,7 @@ class ArenaBase extends Phaser.Scene {
         // Fire and Earth use their sprite's natural colors; the rest get an element
         // tint until their unique boss art is ready. Store the post-flash tint so
         // damageBoss can restore it correctly after the white hit-flash.
-        this.bossTint = (this.element !== 'fire' && !isCairnback && !isBellkeeper)
+        this.bossTint = (this.element !== 'fire' && !isCairnback && !isBellkeeper && !isHushwing)
             ? this.colors.primary
             : null;
         if (this.bossTint) this.boss.setTint(this.bossTint);
@@ -782,7 +798,7 @@ class ArenaBase extends Phaser.Scene {
         if (this.bossCharging) return;
 
         // Cairnback and the Bellkeeper hold still during warning and recovery poses
-        if ((this.element === 'earth' || this.element === 'water') &&
+        if ((this.element === 'earth' || this.element === 'water' || this.element === 'air') &&
             (this.bossPhase === 'warning' || this.bossPhase === 'recovery')) {
             this.boss.setVelocity(0, 0);
             return;
@@ -826,7 +842,7 @@ class ArenaBase extends Phaser.Scene {
             this.bossCharging = false;
 
             // Unique boss art drops into the open-shell recovery after every attack
-            if (this.element === 'earth' || this.element === 'water') this.startBossRecovery();
+            if (this.element === 'earth' || this.element === 'water' || this.element === 'air') this.startBossRecovery();
         });
     }
 
@@ -834,31 +850,39 @@ class ArenaBase extends Phaser.Scene {
     bossAnimKey(suffix) {
         if (this.element === 'earth') return `boss_cairnback_${suffix}`;
         if (this.element === 'water') return `boss_bellkeeper_${suffix}`;
+        if (this.element === 'air')   return `boss_hushwing_${suffix}`;
         return null;
     }
 
-    // 0.6 s wind-up: stands still in the warning pose, then attacks
+    // Wind-up: stands still in the warning pose, then attacks
+    // (Hushwing takes 0.8 s and paints a shadow target on the ground)
     startBossWarning() {
         if (!this.boss || !this.boss.active) return;
 
+        const warnMs = this.element === 'air' ? 800 : 600;
+
         this.bossPhase      = 'warning';
-        this.bossPhaseUntil = this.time.now + 600;
+        this.bossPhaseUntil = this.time.now + warnMs;
         this.boss.setVelocity(0, 0);
 
         const warnKey = this.bossAnimKey('warning');
         if (warnKey) this.boss.play(warnKey);
 
-        this.time.delayedCall(600, () => {
+        // Air: the marker chases the player for 0.5 s, then locks in place
+        if (this.element === 'air') this.spawnDiveShadow(500);
+
+        this.time.delayedCall(warnMs, () => {
             if (this.boss && this.boss.active && !this.gameOver) this.bossAttack();
         });
     }
 
-    // The element's attack after the warning: Earth charges, Water rings the bell
+    // The element's attack after the warning
     bossAttack() {
         if (!this.boss || !this.boss.active) return;
 
-        if (this.element === 'water') this.bellkeeperVolley();
-        else                          this.bossCharge();
+        if (this.element === 'water')     this.bellkeeperVolley();
+        else if (this.element === 'air')  this.hushwingDive();
+        else                              this.bossCharge();
     }
 
     // Bellkeeper: 12 water orbs, two consecutive ones missing (a 60° escape gap)
@@ -889,6 +913,69 @@ class ArenaBase extends Phaser.Scene {
         this.time.delayedCall(500, () => {
             this.bossCharging = false;
             if (this.boss && this.boss.active) this.startBossRecovery();
+        });
+    }
+
+    // -------------------------------------------------------
+    //  HUSHWING DIVE
+    // -------------------------------------------------------
+
+    // Ground marker: chases the player for `followMs`, then locks in place
+    spawnDiveShadow(followMs) {
+        this.clearDiveShadow();
+
+        this.diveShadow = this.add.ellipse(
+            this.player.x, this.player.y + 6, 64, 26, 0x000000, 0.4
+        ).setDepth(3);
+
+        this.diveTargetX   = this.player.x;
+        this.diveTargetY   = this.player.y;
+        this._shadowLockAt = this.time.now + followMs;
+    }
+
+    updateDiveShadow() {
+        if (!this.diveShadow) return;
+        if (this.time.now >= this._shadowLockAt) return;   // locked: stays put
+
+        this.diveTargetX = this.player.x;
+        this.diveTargetY = this.player.y;
+        this.diveShadow.setPosition(this.diveTargetX, this.diveTargetY + 6);
+    }
+
+    clearDiveShadow() {
+        if (!this.diveShadow) return;
+        this.diveShadow.destroy();
+        this.diveShadow = null;
+    }
+
+    // Fast dive at the locked marker. Contact damage comes from the existing
+    // player/boss overlap (damagePlayer(15)), so i-frames and dash still apply.
+    hushwingDive() {
+        if (!this.boss || !this.boss.active) return;
+
+        this.bossCharging   = true;
+        this.bossPhase      = 'attacking';
+        this.bossPhaseUntil = this.time.now + 700;
+        this.boss.play('boss_hushwing_dive');
+
+        const tx = (this.diveTargetX !== undefined) ? this.diveTargetX : this.player.x;
+        const ty = (this.diveTargetY !== undefined) ? this.diveTargetY : this.player.y;
+
+        this.clearDiveShadow();
+
+        const dist  = distanceBetween(this.boss.x, this.boss.y, tx, ty);
+        const speed = 720;
+        const angle = angleBetween(this.boss.x, this.boss.y, tx, ty);
+
+        this.boss.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+        // Stop on arrival; floor of 120 ms so a short dive still reads
+        this.time.delayedCall(Math.max(120, (dist / speed) * 1000), () => {
+            if (!this.boss || !this.boss.active) return;
+
+            this.bossCharging = false;
+            this.boss.setVelocity(0, 0);
+            this.startBossRecovery();
         });
     }
 
@@ -984,7 +1071,7 @@ class ArenaBase extends Phaser.Scene {
         if (!Number.isFinite(amount) || amount <= 0) return;
 
         // Cairnback's open shell is a weak spot: double damage during recovery
-        const damage = ((this.element === 'earth' || this.element === 'water') &&
+        const damage = ((this.element === 'earth' || this.element === 'water' || this.element === 'air') &&
                         this.bossPhase === 'recovery')
             ? amount * 2
             : amount;
@@ -1108,6 +1195,7 @@ class ArenaBase extends Phaser.Scene {
         this.boss.destroy();
         this.boss = null;
         if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
+        this.clearDiveShadow();
 
         const bossPoints = Math.round(100 * this.difficulty.scoreMultiplier);
         this.arenaScore += bossPoints;
@@ -1559,6 +1647,7 @@ class ArenaBase extends Phaser.Scene {
         this.enemies.getChildren().forEach(e => e.setVelocity(0, 0));
         if (this.boss && this.boss.active) this.boss.setVelocity(0, 0);
         if (this.bossProjectiles) this.bossProjectiles.clear(true, true);
+        this.clearDiveShadow();
         if (this.spawnTimer) { this.spawnTimer.remove(); this.spawnTimer = null; }
 
         GameState.arenaData.kills = this.enemiesKilled;

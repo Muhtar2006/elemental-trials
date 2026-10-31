@@ -109,6 +109,13 @@ class BootScene extends Phaser.Scene {
         // Hand-drawn boss sprite (fire skull; tinted for other elements until unique bosses are made)
         this.load.image('boss_sprite', 'assets/fire_boss.png');
 
+        // Cairnback, the Earth boss — 7 frames in one row, 64×64 each.
+        // 0-3 idle loop, 4 warning, 5 charge, 6 recovery (shell open).
+        this.load.spritesheet('boss_earth_cairnback', 'assets/boss_earth_cairnback.png', {
+            frameWidth:  64,
+            frameHeight: 64,
+        });
+
         // Insect enemy spritesheets — 32×32 frames, 4 frames per sheet
         this.load.spritesheet('insect_beetle', 'assets/insects/BeetleMove.png', { frameWidth: 32, frameHeight: 32 });
         this.load.spritesheet('insect_maggot', 'assets/insects/MaggotWalk.png', { frameWidth: 32, frameHeight: 32 });
@@ -140,6 +147,38 @@ class BootScene extends Phaser.Scene {
                 frames: this.anims.generateFrameNumbers('fireball_ember', { start: 0, end: 3 }),
                 frameRate: 10,
                 repeat: -1,
+            });
+        }
+
+        // Cairnback animations — idle plays now; the other three are registered
+        // for the upcoming attack work and are not triggered yet.
+        if (!this.anims.exists('boss_cairnback_idle')) {
+            this.anims.create({
+                key: 'boss_cairnback_idle',
+                frames: this.anims.generateFrameNumbers('boss_earth_cairnback', { start: 0, end: 3 }),
+                frameRate: 6,
+                repeat: -1,
+            });
+
+            this.anims.create({
+                key: 'boss_cairnback_warning',
+                frames: [{ key: 'boss_earth_cairnback', frame: 4 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_cairnback_charge',
+                frames: [{ key: 'boss_earth_cairnback', frame: 5 }],
+                frameRate: 10,
+                repeat: 0,
+            });
+
+            this.anims.create({
+                key: 'boss_cairnback_recovery',
+                frames: [{ key: 'boss_earth_cairnback', frame: 6 }],
+                frameRate: 10,
+                repeat: 0,
             });
         }
 

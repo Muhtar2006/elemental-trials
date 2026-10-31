@@ -103,6 +103,7 @@ class ArenaBase extends Phaser.Scene {
         // Run boss AI when the boss is alive
         if (this.boss && this.boss.active) {
             this.updateBossAI(time, delta);
+            if (this.element === 'earth') this.updateBossBreath(delta);
         }
 
         this.updateUI();
@@ -566,7 +567,11 @@ class ArenaBase extends Phaser.Scene {
         const w = this.cameras.main.width;
         const h = this.cameras.main.height;
 
-        this.boss = this.physics.add.sprite(w / 2, 130, 'boss_sprite');
+        // Earth has unique art now; the other elements still use the tinted fire skull
+        const isCairnback = this.element === 'earth';
+        const bossTexture = isCairnback ? 'boss_earth_cairnback' : 'boss_sprite';
+
+        this.boss = this.physics.add.sprite(w / 2, 130, bossTexture);
         this.boss.setDepth(9);
         this.boss.hp    = this.difficulty.bossHP;
         this.boss.maxHP = this.difficulty.bossHP;
@@ -574,10 +579,21 @@ class ArenaBase extends Phaser.Scene {
         this.boss.setCollideWorldBounds(true);
         this._lastBossCharge = this.time.now;
 
-        // Fire uses the sprite's natural colors; other elements get an element tint
-        // until their unique boss art is ready. Store the post-flash tint so damageBoss
-        // can restore it correctly after the white hit-flash.
-        this.bossTint = (this.element !== 'fire') ? this.colors.primary : null;
+        // Cairnback renders at scale 2 (128 px) but keeps the old boss's 96×96
+        // on-screen hitbox, so overlap behaviour is unchanged.
+        if (isCairnback) {
+            this.boss.body.setSize(48, 48, true);
+            this.boss.play('boss_cairnback_idle');
+
+            // Breathing state: phase in ms, and the pixel offset currently applied
+            this._breathPhase   = 0;
+            this._breathApplied = 0;
+        }
+
+        // Fire and Earth use their sprite's natural colors; the rest get an element
+        // tint until their unique boss art is ready. Store the post-flash tint so
+        // damageBoss can restore it correctly after the white hit-flash.
+        this.bossTint = (this.element !== 'fire' && !isCairnback) ? this.colors.primary : null;
         if (this.bossTint) this.boss.setTint(this.bossTint);
 
         // Wire up boss-specific overlaps now that the sprite exists
@@ -696,6 +712,55 @@ class ArenaBase extends Phaser.Scene {
         );
 
         this.time.delayedCall(650, () => { this.bossCharging = false; });
+    }
+
+    // -------------------------------------------------------
+    //  CAIRNBACK BREATHING
+    // -------------------------------------------------------
+
+    // Idle "breathing": a 2 px rise and fall, one breath every 1.5 s.
+    // Whole-pixel offsets only; the bob pauses (and returns to neutral)
+    // while the boss is charging or frozen.
+    updateBossBreath(delta) {
+        const frozen = this.boss.frozenUntil && this.time.now < this.boss.frozenUntil;
+        const breathing = !this.bossCharging && !frozen;
+
+        // --- TEMPORARY DEBUG: remove after testing ---
+        const BREATH_PX = 20;
+        // ----------------------------------------------
+
+        if (!breathing) {
+            if (!this._breathWasPaused) {
+                console.log('breath paused', this.bossCharging ? '(charging)' : '(frozen)');
+                this._breathWasPaused = true;
+            }
+            this._breathPhase = 0;
+            this.applyBossBreathOffset(0);
+            return;
+        }
+
+        this._breathWasPaused = false;
+
+        const prevPhase = this._breathPhase;
+        this._breathPhase = (prevPhase + delta) % 1500;
+
+        // TEMPORARY DEBUG: one line per completed breath
+        if (this._breathPhase < prevPhase) console.log('breath tick');
+
+        const t = this._breathPhase / 1500;                    // 0 → 1 across one breath
+        const lift = (1 - Math.cos(t * Math.PI * 2)) / 2;      // 0 → 1 → 0
+        this.applyBossBreathOffset(-Math.round(lift * BREATH_PX));
+    }
+
+    // Move sprite and body together by the same delta, so the bob is purely
+    // visual and the hitbox can never drift away from the sprite.
+    applyBossBreathOffset(offset) {
+        if (offset === this._breathApplied) return;
+
+        const d = offset - this._breathApplied;
+        this.boss.y      += d;
+        this.boss.body.y += d;
+        this._breathApplied = offset;
     }
 
     // -------------------------------------------------------
